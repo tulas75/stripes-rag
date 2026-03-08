@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "stripes-rag"
+version = "0.1.0"
+description = "Document indexing & semantic search pipeline for local PDF/DOCX files"
+requires-python = ">=3.11"
+dependencies = [
+    "docling",
+    "langchain-core",
+    "langchain-postgres",
+    "langchain-huggingface",
+    "sentence-transformers",
+    "psycopg[binary]",
+    "click",
+    "pydantic-settings",
+    "python-dotenv",
+    "rich",
+    "streamlit",
+    "smolagents",
+    "litellm",
+]
+
+[project.scripts]
+stripes = "stripes_rag.cli:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stripes_rag"]
