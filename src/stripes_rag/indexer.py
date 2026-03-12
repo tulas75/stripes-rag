@@ -81,17 +81,6 @@ def _parse_and_chunk(file_path: Path) -> dict:
     doc = convert_file(file_path)
     parse_time = time.perf_counter() - t0
 
-    # Guard against documents that are too large for the chunker/tokenizer.
-    # HybridChunker tokenizes the full text internally to find split points —
-    # a 340K-token doc will peg the CPU for minutes.  8192 * 4 ≈ model max seq len.
-    max_doc_chars = 8192 * 4 * 20  # ~20x a single chunk ≈ 655K chars
-    doc_text_len = len(doc.export_to_text())
-    if doc_text_len > max_doc_chars:
-        raise ValueError(
-            f"Document text too large for chunker ({doc_text_len:,} chars, "
-            f"limit {max_doc_chars:,})"
-        )
-
     t0 = time.perf_counter()
     chunks = chunk_document(doc, file_path, file_hash)
     del doc
