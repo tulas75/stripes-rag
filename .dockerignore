@@ -6,6 +6,6 @@ dist/
 build/
 .env
 *.DS_Store
-docs/
 pgdata/
-*.pdf
+.git/
+docs/

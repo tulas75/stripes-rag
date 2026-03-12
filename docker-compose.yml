@@ -15,3 +15,17 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  app:
+    build: .
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      EMBEDDING_DEVICE: cpu
+    volumes:
+      - ${DOCUMENTS_PATH:-./docs}:/docs
+    depends_on:
+      postgres:
+        condition: service_healthy

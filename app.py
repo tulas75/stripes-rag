@@ -27,6 +27,8 @@ st.set_page_config(
 MODELS = {
     "Qwen3.5 4B (Ollama)": "ollama_chat/qwen3.5:4b-q8_0",
     "Qwen3.5 9B (Ollama)": "ollama_chat/qwen3.5:9b-q8_0",
+    "Qwen3.5 0.8B (Ollama)": "ollama_chat/qwen3.5:0.8b",
+    "Qwen3.5 2B (Ollama)": "ollama_chat/qwen3.5:2b",
     "DeepSeek Chat": "deepseek/deepseek-chat",
     "Mistral Small 3.2": "deepinfra/mistralai/Mistral-Small-3.2-24B-Instruct-2506",
     "Mistral Small": "deepinfra/mistralai/Mistral-Small-24B-Instruct-2501",
@@ -256,6 +258,7 @@ if prompt or needs_response:
 
             agent = CodeAgent(
                 tools=[retriever_tool],
+                #model=LiteLLMModel(model_id=model_id, temperature=temperature, reasoning_effort="low"),
                 model=LiteLLMModel(model_id=model_id, temperature=temperature),
                 max_steps=max_steps,
                 stream_outputs=False,
