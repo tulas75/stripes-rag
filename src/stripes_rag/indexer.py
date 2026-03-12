@@ -24,7 +24,14 @@ from stripes_rag.db import (
 from stripes_rag.embeddings import get_embeddings
 from stripes_rag.tracker import FileTracker, _sha256
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx"}
+SUPPORTED_EXTENSIONS = {
+    ".pdf",   # Adobe PDF
+    ".docx",  # Microsoft Word
+    ".xlsx",  # Microsoft Excel
+    ".pptx",  # Microsoft PowerPoint
+    ".html",  # HTML documents
+    ".md",    # Markdown
+}
 
 
 @dataclass
@@ -39,7 +46,7 @@ class FileResult:
 
 
 def discover_files(directory: Path, recursive: bool = False) -> list[Path]:
-    """Find all PDF/DOCX files in directory, skipping macOS resource forks."""
+    """Find all supported document files in directory, skipping macOS resource forks."""
     files: list[Path] = []
     if recursive:
         for ext in SUPPORTED_EXTENSIONS:
@@ -214,7 +221,7 @@ def index_directory(
     progress_callback=None,
     result_callback=None,
 ) -> list[FileResult]:
-    """Index all PDF/DOCX files in a directory.
+    """Index all supported document files in a directory.
 
     Uses process-pool pipeline parallelism for throughput.
     Per-file atomic commits for crash-safe resumability.

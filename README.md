@@ -1,10 +1,10 @@
 # Stripes RAG
 
-A CLI tool and web interface for indexing PDF/DOCX documents into PostgreSQL with pgvector for semantic search and retrieval-augmented generation (RAG).
+A CLI tool and web interface for indexing documents (PDF, DOCX, XLSX, PPTX, HTML, MD) into PostgreSQL with pgvector for semantic search and retrieval-augmented generation (RAG).
 
 ## Features
 
-- **Document parsing** with [Docling](https://github.com/DS4SD/docling) — layout-aware extraction from PDF and DOCX files
+- **Document parsing** with [Docling](https://github.com/DS4SD/docling) — layout-aware extraction from PDF, DOCX, XLSX, PPTX, HTML, and MD files
 - **Hybrid chunking** — structural + semantic chunking with heading and page number metadata
 - **Embedding** with [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) (1024-dim, multilingual)
 - **pgvector storage** — HNSW or IVFFlat indexing for fast similarity search
@@ -67,7 +67,7 @@ streamlit run app.py
 
 ### `stripes index <directory>`
 
-Index PDF/DOCX files from a directory.
+Index documents from a directory (supports PDF, DOCX, XLSX, PPTX, HTML, MD).
 
 | Flag | Description |
 |------|-------------|
@@ -144,7 +144,7 @@ For the Streamlit chat app, additional API keys can be set for LLM providers (De
 ## Architecture
 
 ```
-PDF/DOCX files
+PDF, DOCX, XLSX, PPTX, HTML, or MD files
      │
      ▼
 ┌─────────────────────────┐
@@ -181,7 +181,7 @@ Documents are split using Docling's **HybridChunker**, which combines structural
 
 ### How it works
 
-1. **Docling parses the document** into a structured `DoclingDocument` — preserving headings, tables, lists, paragraphs, and layout hierarchy from the original PDF/DOCX.
+1. **Docling parses the document** into a structured `DoclingDocument` — preserving headings, tables, lists, paragraphs, and layout hierarchy from the original document.
 
 2. **HybridChunker splits on document structure first.** It respects natural boundaries (sections, paragraphs, list items) rather than cutting at arbitrary token counts. Sibling elements (e.g. consecutive paragraphs under the same heading) are merged together up to the token limit.
 

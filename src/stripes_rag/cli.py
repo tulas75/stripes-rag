@@ -27,12 +27,12 @@ def cli():
 @click.option("--retry-errors", is_flag=True, help="Retry previously failed files")
 @click.option("-j", "--workers", default=2, show_default=True, help="Parallel parse workers")
 def index(directory: Path, recursive: bool, force: bool, retry_errors: bool, workers: int):
-    """Index PDF/DOCX files from a directory."""
+    """Index documents from a directory (supports PDF, DOCX, XLSX, PPTX, HTML, MD)."""
     from stripes_rag.indexer import discover_files, index_directory
 
     files = discover_files(directory, recursive)
     if not files:
-        console.print("[yellow]No PDF/DOCX files found.[/yellow]")
+        console.print("[yellow]No supported document files found.[/yellow]")
         return
 
     console.print(f"Found [bold]{len(files)}[/bold] files on disk")

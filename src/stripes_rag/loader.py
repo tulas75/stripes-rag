@@ -19,7 +19,7 @@ def get_converter() -> DocumentConverter:
 
 
 def convert_file(path: Path) -> DoclingDocument:
-    """Convert a single PDF/DOCX file to a DoclingDocument.
+    """Convert a document file (PDF, DOCX, XLSX, PPTX, HTML, or MD) to a DoclingDocument.
 
     Raises on conversion failure.
     """
