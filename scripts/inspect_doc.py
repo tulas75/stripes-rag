@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect what Docling extracts from a PDF/DOCX file.
+"""Inspect what Docling extracts from a PDF, DOCX, XLSX, PPTX, HTML, or Markdown file.
 
 Converts the document and prints the full markdown output plus a summary
 of tables, pictures, and pages found.
@@ -43,9 +43,9 @@ def _build_converter(describe_images: bool) -> DocumentConverter:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Inspect what Docling extracts from a PDF/DOCX file.",
+        description="Inspect what Docling extracts from a PDF, DOCX, XLSX, PPTX, HTML, or Markdown file.",
     )
-    parser.add_argument("file", type=Path, help="PDF or DOCX file to inspect")
+    parser.add_argument("file", type=Path, help="PDF, DOCX, XLSX, PPTX, HTML, or Markdown file to inspect")
     parser.add_argument(
         "-d", "--describe-images",
         action="store_true",
