@@ -19,6 +19,11 @@ from stripes_rag.config import settings
 
 _chunker: HybridChunker | None = None
 
+# bge-m3 max sequence length is 8192 tokens; ~4 chars/token is a safe estimate.
+# Truncate any chunk text beyond this to avoid minutes-long tokenization on
+# oversized chunks (e.g. large spreadsheets that become a single chunk).
+_MAX_CHUNK_CHARS = 8192 * 4
+
 
 def get_chunker() -> HybridChunker:
     global _chunker
@@ -48,6 +53,8 @@ def chunk_document(
 
     for idx, chunk in enumerate(chunker.chunk(doc)):
         enriched_text = chunker.serialize(chunk).replace("\x00", "")
+        if len(enriched_text) > _MAX_CHUNK_CHARS:
+            enriched_text = enriched_text[:_MAX_CHUNK_CHARS]
 
         headings = None
         if chunk.meta.headings:

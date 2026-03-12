@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     # Indexing
     index_batch_size: int = 128
+    max_file_size_mb: int = 50
 
     # Vector index type: "hnsw" (default, high recall) or "ivfflat" (faster build, large datasets)
     vector_index_type: Literal["hnsw", "ivfflat"] = "hnsw"

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from langchain_core.documents import Document
 
+from stripes_rag.config import settings
 from stripes_rag.db import (
     TABLE_NAME,
     delete_file_chunks,
@@ -23,6 +24,8 @@ from stripes_rag.db import (
 )
 from stripes_rag.embeddings import get_embeddings
 from stripes_rag.tracker import FileTracker, _sha256
+
+MAX_FILE_BYTES = settings.max_file_size_mb * 1024 * 1024
 
 SUPPORTED_EXTENSIONS = {
     ".pdf",   # Adobe PDF
@@ -77,6 +80,17 @@ def _parse_and_chunk(file_path: Path) -> dict:
     t0 = time.perf_counter()
     doc = convert_file(file_path)
     parse_time = time.perf_counter() - t0
+
+    # Guard against documents that are too large for the chunker/tokenizer.
+    # HybridChunker tokenizes the full text internally to find split points —
+    # a 340K-token doc will peg the CPU for minutes.  8192 * 4 ≈ model max seq len.
+    max_doc_chars = 8192 * 4 * 20  # ~20x a single chunk ≈ 655K chars
+    doc_text_len = len(doc.export_to_text())
+    if doc_text_len > max_doc_chars:
+        raise ValueError(
+            f"Document text too large for chunker ({doc_text_len:,} chars, "
+            f"limit {max_doc_chars:,})"
+        )
 
     t0 = time.perf_counter()
     chunks = chunk_document(doc, file_path, file_hash)
@@ -242,6 +256,14 @@ def index_directory(
             results.append(result)
             if result_callback:
                 result_callback(result)
+        elif file_path.stat().st_size > MAX_FILE_BYTES:
+            size_mb = file_path.stat().st_size / (1024 * 1024)
+            msg = f"File too large ({size_mb:.1f} MB, limit {settings.max_file_size_mb} MB)"
+            tracker.upsert_error(file_path, msg)
+            result = FileResult(path=file_path, status="error", error=msg)
+            results.append(result)
+            if result_callback:
+                result_callback(result)
         else:
             files_to_process.append(file_path)
 
@@ -274,6 +296,14 @@ def reindex_all(workers: int = 4, progress_callback=None) -> list[FileResult]:
             tracker.upsert_error(file_path, "File not found")
             results.append(
                 FileResult(path=file_path, status="error", error="File not found")
+            )
+            continue
+        if file_path.stat().st_size > MAX_FILE_BYTES:
+            size_mb = file_path.stat().st_size / (1024 * 1024)
+            msg = f"File too large ({size_mb:.1f} MB, limit {settings.max_file_size_mb} MB)"
+            tracker.upsert_error(file_path, msg)
+            results.append(
+                FileResult(path=file_path, status="error", error=msg)
             )
             continue
         files_to_process.append(file_path)
