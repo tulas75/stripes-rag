@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # Embedding model
     #embedding_model: str = "google/embeddinggemma-300m"
     embedding_model: str = "BAAI/bge-m3"
-    embedding_device: str = "mps"
+    embedding_device: str = "cpu"
     embedding_batch_size: int = 64
 
     # Chunking

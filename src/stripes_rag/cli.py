@@ -26,8 +26,13 @@ def cli():
 @click.option("--force", "-f", is_flag=True, help="Re-index all files regardless of changes")
 @click.option("--retry-errors", is_flag=True, help="Retry previously failed files")
 @click.option("-j", "--workers", default=2, show_default=True, help="Parallel parse workers")
-def index(directory: Path, recursive: bool, force: bool, retry_errors: bool, workers: int):
+@click.option("--device", type=click.Choice(["cpu", "mps", "cuda"]), default=None,
+              help="Embedding device (overrides EMBEDDING_DEVICE env var)")
+def index(directory: Path, recursive: bool, force: bool, retry_errors: bool, workers: int, device: str | None):
     """Index documents from a directory (supports PDF, DOCX, XLSX, PPTX, HTML, MD)."""
+    if device:
+        settings.embedding_device = device
+
     from stripes_rag.indexer import discover_files, index_directory
 
     files = discover_files(directory, recursive)
@@ -311,8 +316,13 @@ def delete(filename: str, yes: bool):
 
 @cli.command()
 @click.option("-j", "--workers", default=2, show_default=True, help="Parallel parse workers")
-def reindex(workers: int):
+@click.option("--device", type=click.Choice(["cpu", "mps", "cuda"]), default=None,
+              help="Embedding device (overrides EMBEDDING_DEVICE env var)")
+def reindex(workers: int, device: str | None):
     """Re-index all previously tracked files."""
+    if device:
+        settings.embedding_device = device
+
     from stripes_rag.indexer import reindex_all
     from stripes_rag.tracker import FileTracker
 
