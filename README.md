@@ -48,7 +48,8 @@ This starts PostgreSQL 17 with the pgvector extension on port 5432.
 ### 4. Index documents
 
 ```bash
-stripes index /path/to/documents
+stripes index /path/to/documents              # uses cpu (default)
+stripes index /path/to/documents --device mps # use Apple GPU on macOS
 ```
 
 ### 5. Search
@@ -75,6 +76,7 @@ Index documents from a directory (supports PDF, DOCX, XLSX, PPTX, HTML, MD).
 | `-f, --force` | Re-index all files regardless of changes |
 | `--retry-errors` | Retry previously failed files |
 | `-j, --workers N` | Parallel parse workers (default: 2) |
+| `--device DEVICE` | Embedding device: `cpu`, `mps`, or `cuda` (overrides `EMBEDDING_DEVICE`) |
 
 ### `stripes search <query>`
 
@@ -112,6 +114,7 @@ Re-index all previously tracked files.
 | Flag | Description |
 |------|-------------|
 | `-j, --workers N` | Parallel parse workers (default: 2) |
+| `--device DEVICE` | Embedding device: `cpu`, `mps`, or `cuda` (overrides `EMBEDDING_DEVICE`) |
 
 ### `stripes reset`
 
@@ -133,7 +136,7 @@ All settings are managed via environment variables (or `.env` file):
 | `POSTGRES_PORT` | `5432` | PostgreSQL port |
 | `POSTGRES_DB` | `stripes_rag` | Database name |
 | `EMBEDDING_MODEL` | `BAAI/bge-m3` | HuggingFace embedding model |
-| `EMBEDDING_DEVICE` | `mps` | Compute device (`mps`, `cpu`, `cuda`) |
+| `EMBEDDING_DEVICE` | `cpu` | Compute device (`cpu`, `mps`, `cuda`) |
 | `EMBEDDING_BATCH_SIZE` | `64` | Embedding batch size |
 | `CHUNK_MAX_TOKENS` | `512` | Max tokens per chunk |
 | `INDEX_BATCH_SIZE` | `128` | DB insertion batch size |
