@@ -8,7 +8,7 @@ A CLI tool and web interface for indexing documents (PDF, DOCX, XLSX, PPTX, HTML
 - **Hybrid chunking** — structural + semantic chunking with heading and page number metadata
 - **Embedding** with [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) (1024-dim, multilingual)
 - **pgvector storage** — HNSW or IVFFlat indexing for fast similarity search
-- **Crash-safe resumability** — per-file atomic commits with SHA-256 change detection
+- **Crash-safe resumability** — pending state tracking with per-file atomic commits; interrupted runs resume from where they left off
 - **Parallel processing** — `ProcessPoolExecutor` for parsing/chunking with configurable worker count
 - **Streamlit chat UI** — interactive RAG chat with multiple LLM providers via LiteLLM and smolagents
 
@@ -48,8 +48,9 @@ This starts PostgreSQL 17 with the pgvector extension on port 5432.
 ### 4. Index documents
 
 ```bash
-stripes index /path/to/documents              # uses cpu (default)
-stripes index /path/to/documents --device mps # use Apple GPU on macOS
+stripes index /path/to/documents -r             # scan + process (cpu, default)
+stripes index /path/to/documents -r --device mps # use Apple GPU on macOS
+stripes index                                    # resume pending files from a previous run
 ```
 
 ### 5. Search
@@ -66,9 +67,18 @@ streamlit run app.py
 
 ## CLI Reference
 
-### `stripes index <directory>`
+### `stripes index [directory]`
 
-Index documents from a directory (supports PDF, DOCX, XLSX, PPTX, HTML, MD).
+Index documents from a directory, or resume processing pending files.
+
+- **With directory**: scans for new/changed files, registers them as pending, then processes the queue.
+- **Without directory**: resumes processing any pending files from a previous interrupted run.
+
+```bash
+stripes index docs/ -r              # scan + process
+stripes index                       # resume: process pending only
+stripes index docs/ -r --device mps # scan + process with Apple GPU
+```
 
 | Flag | Description |
 |------|-------------|
@@ -77,6 +87,23 @@ Index documents from a directory (supports PDF, DOCX, XLSX, PPTX, HTML, MD).
 | `--retry-errors` | Retry previously failed files |
 | `-j, --workers N` | Parallel parse workers (default: 2) |
 | `--device DEVICE` | Embedding device: `cpu`, `mps`, or `cuda` (overrides `EMBEDDING_DEVICE`) |
+| `--skip-reindex` | Skip rebuilding the vector index after indexing |
+
+### `stripes scan <directory>`
+
+Scan a directory and register files as pending without processing them. Useful for previewing what would be indexed.
+
+```bash
+stripes scan docs/ -r              # register pending files
+stripes scan docs/ -r --dry-run    # preview what would be queued
+```
+
+| Flag | Description |
+|------|-------------|
+| `-r, --recursive` | Scan subdirectories |
+| `-f, --force` | Re-queue all files regardless of changes |
+| `--retry-errors` | Re-queue previously failed files |
+| `--dry-run` | Show what would be queued without making changes |
 
 ### `stripes search <query>`
 
@@ -89,11 +116,11 @@ Run a semantic search against indexed documents.
 
 ### `stripes status`
 
-Show indexing statistics — file counts, chunk totals, and timestamps.
+Show indexing statistics — file counts (indexed, pending, errored), chunk totals, and timestamps.
 
 ### `stripes list`
 
-List all indexed files with status, size, and chunk count.
+List all tracked files with status (indexed, pending, error), size, and chunk count.
 
 ### `stripes errors`
 
@@ -115,6 +142,15 @@ Re-index all previously tracked files.
 |------|-------------|
 | `-j, --workers N` | Parallel parse workers (default: 2) |
 | `--device DEVICE` | Embedding device: `cpu`, `mps`, or `cuda` (overrides `EMBEDDING_DEVICE`) |
+| `--skip-reindex` | Skip rebuilding the vector index after indexing |
+
+### `stripes rebuild-index`
+
+Rebuild the vector similarity index. Useful after running `index` or `reindex` with `--skip-reindex`, or after changing `VECTOR_INDEX_TYPE`.
+
+```bash
+stripes rebuild-index
+```
 
 ### `stripes reset`
 
@@ -175,7 +211,8 @@ PDF, DOCX, XLSX, PPTX, HTML, or MD files
 
 - **Pipeline parallelism**: Workers parse and chunk files in subprocesses while the main thread embeds and stores results
 - **Sliding window**: Keeps `workers + 1` futures in flight to bound memory usage
-- **Atomic commits**: Each file is committed independently — interrupted runs resume from where they left off
+- **Two-phase indexing**: `scan` registers files as pending in the DB; `index` processes the pending queue. This allows `stripes index` (without a directory) to resume after a crash
+- **Atomic commits**: Each file is committed independently — interrupted runs resume from remaining pending files
 - **Change detection**: SHA-256 file hashes tracked in `file_tracking` table; unchanged files are skipped
 
 ## Chunking Strategy
@@ -238,7 +275,7 @@ Each chunk carries structured metadata extracted from Docling's provenance data:
 | `file_hash` | `TEXT` | SHA-256 hash |
 | `file_size` | `BIGINT` | File size in bytes |
 | `chunk_count` | `INTEGER` | Number of chunks |
-| `status` | `TEXT` | `indexed` or `error` |
+| `status` | `TEXT` | `pending`, `indexed`, or `error` |
 | `error_message` | `TEXT` | Error details (if any) |
 | `indexed_at` | `TIMESTAMPTZ` | First indexed |
 | `updated_at` | `TIMESTAMPTZ` | Last updated |

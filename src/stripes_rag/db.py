@@ -39,27 +39,21 @@ def init_vectorstore_table(engine: PGEngine) -> None:
         else:
             raise
 
-    # Ensure indexes exist (idempotent)
+    # Ensure indexes exist (idempotent — no drop, so instant on subsequent runs)
     async def _create_indexes():
         async with engine._pool.connect() as conn:
             index_type = settings.vector_index_type
             index_name = f"idx_{TABLE_NAME}_embedding"
 
-            # Drop existing vector index if it exists (type may have changed)
-            await conn.execute(text(
-                f'DROP INDEX IF EXISTS {index_name}'
-            ))
-
-            # Create vector index based on configured type
             if index_type == "ivfflat":
                 await conn.execute(text(
-                    f'CREATE INDEX {index_name} '
+                    f'CREATE INDEX IF NOT EXISTS {index_name} '
                     f'ON "{TABLE_NAME}" USING ivfflat (embedding vector_cosine_ops) '
                     f'WITH (lists = 100)'
                 ))
             else:  # hnsw (default)
                 await conn.execute(text(
-                    f'CREATE INDEX {index_name} '
+                    f'CREATE INDEX IF NOT EXISTS {index_name} '
                     f'ON "{TABLE_NAME}" USING hnsw (embedding vector_cosine_ops) '
                     f'WITH (m = 16, ef_construction = 64)'
                 ))
@@ -72,6 +66,36 @@ def init_vectorstore_table(engine: PGEngine) -> None:
             await conn.commit()
 
     engine._run_as_sync(_create_indexes())
+
+
+def rebuild_vector_index(engine: PGEngine) -> None:
+    """Drop and recreate the vector similarity index.
+
+    Use after bulk indexing to ensure the index reflects all new data.
+    """
+    from sqlalchemy import text
+
+    async def _rebuild():
+        async with engine._pool.connect() as conn:
+            index_name = f"idx_{TABLE_NAME}_embedding"
+            await conn.execute(text(f'DROP INDEX IF EXISTS {index_name}'))
+
+            index_type = settings.vector_index_type
+            if index_type == "ivfflat":
+                await conn.execute(text(
+                    f'CREATE INDEX {index_name} '
+                    f'ON "{TABLE_NAME}" USING ivfflat (embedding vector_cosine_ops) '
+                    f'WITH (lists = 100)'
+                ))
+            else:  # hnsw (default)
+                await conn.execute(text(
+                    f'CREATE INDEX {index_name} '
+                    f'ON "{TABLE_NAME}" USING hnsw (embedding vector_cosine_ops) '
+                    f'WITH (m = 16, ef_construction = 64)'
+                ))
+            await conn.commit()
+
+    engine._run_as_sync(_rebuild())
 
 
 def get_vectorstore(engine: PGEngine, embeddings: Embeddings) -> PGVectorStore:

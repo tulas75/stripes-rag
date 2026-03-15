@@ -16,14 +16,14 @@ from langchain_core.documents import Document
 
 from stripes_rag.config import settings
 from stripes_rag.db import (
-    TABLE_NAME,
     delete_file_chunks,
     get_engine,
     get_vectorstore,
     init_vectorstore_table,
+    rebuild_vector_index,
 )
 from stripes_rag.embeddings import get_embeddings
-from stripes_rag.tracker import FileTracker, _sha256
+from stripes_rag.tracker import FileTracker
 
 MAX_FILE_BYTES = settings.max_file_size_mb * 1024 * 1024
 
@@ -128,8 +128,13 @@ def _embed_and_store(
     chunk_time = data["chunk_time"]
     num_chunks = data["num_chunks"]
 
+    # Extract file_hash from worker data to avoid recomputing
+    file_hash = None
+    if lc_doc_data:
+        file_hash = lc_doc_data[0]["metadata"].get("file_hash")
+
     if not lc_doc_data:
-        tracker.upsert_record(file_path, 0)
+        tracker.upsert_record(file_path, 0, file_hash=file_hash)
         return FileResult(
             path=file_path, status="indexed", chunks=0,
             parse_time=parse_time, chunk_time=chunk_time,
@@ -145,7 +150,7 @@ def _embed_and_store(
     vectorstore.add_documents(lc_docs)
     embed_time = time.perf_counter() - t0
 
-    tracker.upsert_record(file_path, num_chunks)
+    tracker.upsert_record(file_path, num_chunks, file_hash=file_hash)
 
     return FileResult(
         path=file_path, status="indexed", chunks=num_chunks,
@@ -215,37 +220,55 @@ def _run_pipeline(
 # Public API
 # ---------------------------------------------------------------------------
 
-def index_directory(
-    directory: Path,
-    recursive: bool = False,
-    force: bool = False,
-    retry_errors: bool = False,
-    workers: int = 4,
-    progress_callback=None,
-    result_callback=None,
-) -> list[FileResult]:
-    """Index all supported document files in a directory.
+def setup_pipeline():
+    """Initialize DB engine, embedding model, and vectorstore.
 
-    Uses process-pool pipeline parallelism for throughput.
-    Per-file atomic commits for crash-safe resumability.
+    Call this once before index_pending() to front-load the slow model
+    loading step (visible under a spinner in the CLI).
     """
     engine = get_engine()
     init_vectorstore_table(engine)
     embeddings = get_embeddings()
     vectorstore = get_vectorstore(engine, embeddings)
+    return engine, embeddings, vectorstore
+
+
+def index_pending(
+    workers: int = 4,
+    progress_callback=None,
+    result_callback=None,
+    *,
+    engine=None,
+    vectorstore=None,
+    rebuild_index: bool = False,
+    rebuild_callback=None,
+) -> list[FileResult]:
+    """Process all files with status='pending' in the tracker.
+
+    This is the main processing entry point — scan phase (register_pending)
+    should have already run to populate the pending queue.
+
+    Pass engine/vectorstore from setup_pipeline() to avoid re-initializing.
+    When rebuild_index=True, drops and recreates the vector index after processing.
+    """
+    if engine is None or vectorstore is None:
+        engine, _, vectorstore = setup_pipeline()
     tracker = FileTracker()
 
-    files = discover_files(directory, recursive)
+    pending = tracker.pending_files()
     results: list[FileResult] = []
     files_to_process: list[Path] = []
 
-    for file_path in files:
-        if not force and not tracker.needs_indexing(file_path, retry_errors=retry_errors):
-            result = FileResult(path=file_path, status="skipped")
+    for rec in pending:
+        file_path = Path(rec.file_path)
+        if not file_path.exists():
+            tracker.upsert_error(file_path, "File not found")
+            result = FileResult(path=file_path, status="error", error="File not found")
             results.append(result)
             if result_callback:
                 result_callback(result)
-        elif file_path.stat().st_size > MAX_FILE_BYTES:
+            continue
+        if file_path.stat().st_size > MAX_FILE_BYTES:
             size_mb = file_path.stat().st_size / (1024 * 1024)
             msg = f"File too large ({size_mb:.1f} MB, limit {settings.max_file_size_mb} MB)"
             tracker.upsert_error(file_path, msg)
@@ -253,8 +276,8 @@ def index_directory(
             results.append(result)
             if result_callback:
                 result_callback(result)
-        else:
-            files_to_process.append(file_path)
+            continue
+        files_to_process.append(file_path)
 
     pipeline_results = _run_pipeline(
         files_to_process, engine, vectorstore, tracker,
@@ -264,44 +287,64 @@ def index_directory(
     )
     results.extend(pipeline_results)
 
+    if rebuild_index and any(r.status == "indexed" for r in results):
+        if rebuild_callback:
+            rebuild_callback("start")
+        rebuild_vector_index(engine)
+        if rebuild_callback:
+            rebuild_callback("done")
+
     return results
 
 
-def reindex_all(workers: int = 4, progress_callback=None) -> list[FileResult]:
-    """Re-index all previously tracked files."""
-    engine = get_engine()
-    init_vectorstore_table(engine)
-    embeddings = get_embeddings()
-    vectorstore = get_vectorstore(engine, embeddings)
+def index_directory(
+    directory: Path,
+    recursive: bool = False,
+    force: bool = False,
+    retry_errors: bool = False,
+    workers: int = 4,
+    progress_callback=None,
+    result_callback=None,
+) -> tuple[int, int, int, list[FileResult]]:
+    """Scan + process all supported document files in a directory.
+
+    Returns (new_pending, already_pending, skipped, results).
+    Phase 1: discover files and register as pending via tracker.
+    Phase 2: process pending queue via index_pending().
+    """
     tracker = FileTracker()
+    files = discover_files(directory, recursive)
 
-    paths = tracker.tracked_paths()
-    results: list[FileResult] = []
-    files_to_process: list[Path] = []
+    new_pending, already_pending, skipped = tracker.register_pending(
+        files, force=force, retry_errors=retry_errors,
+    )
 
-    for path_str in paths:
-        file_path = Path(path_str)
-        if not file_path.exists():
-            tracker.upsert_error(file_path, "File not found")
-            results.append(
-                FileResult(path=file_path, status="error", error="File not found")
-            )
-            continue
-        if file_path.stat().st_size > MAX_FILE_BYTES:
-            size_mb = file_path.stat().st_size / (1024 * 1024)
-            msg = f"File too large ({size_mb:.1f} MB, limit {settings.max_file_size_mb} MB)"
-            tracker.upsert_error(file_path, msg)
-            results.append(
-                FileResult(path=file_path, status="error", error=msg)
-            )
-            continue
-        files_to_process.append(file_path)
-
-    pipeline_results = _run_pipeline(
-        files_to_process, engine, vectorstore, tracker,
+    results = index_pending(
         workers=workers,
         progress_callback=progress_callback,
+        result_callback=result_callback,
     )
-    results.extend(pipeline_results)
 
-    return results
+    return new_pending, already_pending, skipped, results
+
+
+def reindex_all(
+    workers: int = 4,
+    progress_callback=None,
+    result_callback=None,
+) -> list[FileResult]:
+    """Re-index all previously tracked files."""
+    tracker = FileTracker()
+    paths = tracker.tracked_paths()
+
+    if not paths:
+        return []
+
+    files = [Path(p) for p in paths if Path(p).exists()]
+    tracker.register_pending(files, force=True)
+
+    return index_pending(
+        workers=workers,
+        progress_callback=progress_callback,
+        result_callback=result_callback,
+    )

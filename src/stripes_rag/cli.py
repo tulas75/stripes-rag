@@ -21,19 +21,82 @@ def cli():
 
 
 @cli.command()
-@click.argument("directory", type=click.Path(exists=True, path_type=Path))
+@click.argument("directory", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("--recursive", "-r", is_flag=True, help="Scan subdirectories")
 @click.option("--force", "-f", is_flag=True, help="Re-index all files regardless of changes")
 @click.option("--retry-errors", is_flag=True, help="Retry previously failed files")
 @click.option("-j", "--workers", default=2, show_default=True, help="Parallel parse workers")
 @click.option("--device", type=click.Choice(["cpu", "mps", "cuda"]), default=None,
               help="Embedding device (overrides EMBEDDING_DEVICE env var)")
-def index(directory: Path, recursive: bool, force: bool, retry_errors: bool, workers: int, device: str | None):
-    """Index documents from a directory (supports PDF, DOCX, XLSX, PPTX, HTML, MD)."""
+@click.option("--skip-reindex", is_flag=True, help="Skip rebuilding the vector index after indexing")
+def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bool, workers: int, device: str | None, skip_reindex: bool):
+    """Index documents from a directory, or resume processing pending files.
+
+    With DIRECTORY: scan + process (register new/changed files, then index them).
+    Without DIRECTORY: resume processing any pending files from a previous run.
+    """
     if device:
         settings.embedding_device = device
 
-    from stripes_rag.indexer import discover_files, index_directory
+    from stripes_rag.indexer import index_pending, setup_pipeline
+    from stripes_rag.tracker import FileTracker
+
+    rebuild = not skip_reindex
+    rebuild_status = None
+
+    def on_rebuild(event):
+        nonlocal rebuild_status
+        if event == "start":
+            rebuild_status = console.status("[bold cyan]Rebuilding vector index...[/bold cyan]")
+            rebuild_status.start()
+        elif event == "done" and rebuild_status:
+            rebuild_status.stop()
+
+    if directory is None:
+        # Resume mode: process pending files only
+        tracker = FileTracker()
+        pending = tracker.pending_files()
+        if not pending:
+            console.print("[green]No pending files to process.[/green]")
+            return
+
+        console.print(f"Resuming [bold]{len(pending)}[/bold] pending files")
+
+        with console.status("[bold cyan]Initializing pipeline...[/bold cyan]"):
+            engine, _, vectorstore = setup_pipeline()
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("{task.completed}/{task.total}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Indexing...", total=len(pending))
+
+            def on_progress(file_path, done, total):
+                progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
+
+            def on_result(result):
+                progress.advance(task)
+
+            results = index_pending(
+                workers=workers,
+                progress_callback=on_progress,
+                result_callback=on_result,
+                engine=engine,
+                vectorstore=vectorstore,
+                rebuild_index=rebuild,
+                rebuild_callback=on_rebuild,
+            )
+            progress.update(task, completed=len(pending))
+
+        _print_results(results)
+        return
+
+    # Scan + process mode
+    from stripes_rag.indexer import discover_files
 
     files = discover_files(directory, recursive)
     if not files:
@@ -42,23 +105,31 @@ def index(directory: Path, recursive: bool, force: bool, retry_errors: bool, wor
 
     console.print(f"Found [bold]{len(files)}[/bold] files on disk")
 
-    # Pre-check which files need indexing so we can show accurate counts
-    with console.status("[bold cyan]Checking which files need indexing...[/bold cyan]"):
-        from stripes_rag.tracker import FileTracker
+    with console.status("[bold cyan]Scanning for changes...[/bold cyan]"):
         tracker = FileTracker()
-        to_process = [f for f in files if force or tracker.needs_indexing(f, retry_errors=retry_errors)]
+        new_pending, already_pending, skipped_count = tracker.register_pending(
+            files, force=force, retry_errors=retry_errors,
+        )
 
-    if not to_process:
+    total_pending = new_pending + already_pending
+
+    if not total_pending:
         console.print("[green]All files are up to date.[/green]")
         return
 
-    skipped = len(files) - len(to_process)
-    if skipped:
-        console.print(f"  [dim]{skipped} already indexed, {len(to_process)} to process[/dim]")
-    else:
-        console.print(f"  [dim]{len(to_process)} to process[/dim]")
+    parts: list[str] = []
+    if skipped_count:
+        parts.append(f"{skipped_count} up to date")
+    if new_pending:
+        parts.append(f"{new_pending} to process")
+    if already_pending:
+        parts.append(f"{already_pending} resuming from previous run")
+    console.print(f"  [dim]{', '.join(parts)}[/dim]")
 
-    already_done = len(files) - len(to_process)
+    with console.status("[bold cyan]Initializing pipeline...[/bold cyan]"):
+        engine, _, vectorstore = setup_pipeline()
+
+    total = total_pending + skipped_count
 
     with Progress(
         SpinnerColumn(),
@@ -68,27 +139,116 @@ def index(directory: Path, recursive: bool, force: bool, retry_errors: bool, wor
         TextColumn("{task.completed}/{task.total}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Indexing...", total=len(files), completed=already_done)
+        task = progress.add_task("Indexing...", total=total, completed=skipped_count)
 
         def on_progress(file_path, done, total):
             progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
 
         def on_result(result):
-            if result.status != "skipped":
-                progress.advance(task)
+            progress.advance(task)
 
-        results = index_directory(
-            directory,
-            recursive=recursive,
-            force=force,
-            retry_errors=retry_errors,
+        results = index_pending(
             workers=workers,
             progress_callback=on_progress,
             result_callback=on_result,
+            engine=engine,
+            vectorstore=vectorstore,
+            rebuild_index=rebuild,
+            rebuild_callback=on_rebuild,
         )
-        progress.update(task, completed=len(files))
+        progress.update(task, completed=total)
 
     _print_results(results)
+
+
+@cli.command()
+@click.argument("directory", type=click.Path(exists=True, path_type=Path))
+@click.option("--recursive", "-r", is_flag=True, help="Scan subdirectories")
+@click.option("--force", "-f", is_flag=True, help="Re-queue all files regardless of changes")
+@click.option("--retry-errors", is_flag=True, help="Re-queue previously failed files")
+@click.option("--dry-run", is_flag=True, help="Show what would be queued without making changes")
+def scan(directory: Path, recursive: bool, force: bool, retry_errors: bool, dry_run: bool):
+    """Scan a directory and register files as pending for indexing.
+
+    Use 'stripes index' (without directory) to process the pending queue.
+    """
+    from stripes_rag.indexer import discover_files
+    from stripes_rag.tracker import FileTracker
+
+    files = discover_files(directory, recursive)
+    if not files:
+        console.print("[yellow]No supported document files found.[/yellow]")
+        return
+
+    console.print(f"Found [bold]{len(files)}[/bold] files on disk")
+
+    if dry_run:
+        tracker = FileTracker()
+        with console.status("[bold cyan]Checking files...[/bold cyan]"):
+            from stripes_rag.tracker import _sha256
+
+            resolved_map = {str(f.resolve()): f for f in files}
+            with tracker._connect() as conn:
+                rows = conn.execute(
+                    "SELECT file_path, file_hash, status FROM file_tracking "
+                    "WHERE file_path = ANY(%s)",
+                    (list(resolved_map.keys()),),
+                ).fetchall()
+            existing = {row[0]: (row[1], row[2]) for row in rows}
+
+            would_queue: list[Path] = []
+            already_pending: int = 0
+            for resolved, path in resolved_map.items():
+                rec = existing.get(resolved)
+                if rec is None:
+                    would_queue.append(path)
+                elif rec[1] == "pending" and not force:
+                    already_pending += 1
+                elif force:
+                    would_queue.append(path)
+                elif rec[1] == "error" and retry_errors:
+                    would_queue.append(path)
+                elif rec[1] != "error":
+                    file_hash = _sha256(path)
+                    if rec[0] != file_hash:
+                        would_queue.append(path)
+
+        if not would_queue and not already_pending:
+            console.print("[green]All files are up to date.[/green]")
+            return
+
+        if would_queue:
+            console.print(f"\n[bold]{len(would_queue)}[/bold] files would be queued:")
+            for f in sorted(would_queue)[:50]:
+                console.print(f"  [cyan]{f.name}[/cyan]")
+            if len(would_queue) > 50:
+                console.print(f"  [dim]... and {len(would_queue) - 50} more[/dim]")
+        if already_pending:
+            console.print(f"  [dim]{already_pending} already pending from previous run[/dim]")
+        if not would_queue:
+            console.print("[green]No new files to queue.[/green]")
+        console.print(f"\n[dim]Run without --dry-run to register them as pending.[/dim]")
+        return
+
+    with console.status("[bold cyan]Scanning for changes...[/bold cyan]"):
+        tracker = FileTracker()
+        new_pending, already_pending, skipped_count = tracker.register_pending(
+            files, force=force, retry_errors=retry_errors,
+        )
+
+    total_pending = new_pending + already_pending
+
+    if not total_pending:
+        console.print("[green]All files are up to date.[/green]")
+        return
+
+    if new_pending:
+        console.print(f"  [bold]{new_pending}[/bold] files registered as pending")
+    if already_pending:
+        console.print(f"  [dim]{already_pending} already pending from previous run[/dim]")
+    if skipped_count:
+        console.print(f"  [dim]{skipped_count} up to date[/dim]")
+    console.print(f"\n[dim]Run 'stripes index' to process {total_pending} pending files.[/dim]")
 
 
 @cli.command()
@@ -169,12 +329,15 @@ def status():
     table.add_column("Metric", style="bold")
     table.add_column("Value")
     table.add_row("Files indexed", str(stats["file_count"]))
+    table.add_row("Files pending", str(stats["pending_count"]))
     table.add_row("Files errored", str(stats["error_count"]))
     table.add_row("Total chunks", str(stats["total_chunks"]))
     table.add_row("Total size", _fmt_size(stats["total_size"]))
     table.add_row("First indexed", str(stats["first_indexed"] or "N/A"))
     table.add_row("Last updated", str(stats["last_updated"] or "N/A"))
     console.print(table)
+    if stats["pending_count"] > 0:
+        console.print(f"\n[dim]Run 'stripes index' to process {stats['pending_count']} pending files.[/dim]")
 
 
 @cli.command(name="list")
@@ -212,6 +375,8 @@ def list_files():
     for i, rec in enumerate(records, 1):
         if rec.status == "error":
             status_text = "[red]error[/red]"
+        elif rec.status == "pending":
+            status_text = "[yellow]pending[/yellow]"
         else:
             status_text = "[green]indexed[/green]"
         table.add_row(
@@ -318,12 +483,13 @@ def delete(filename: str, yes: bool):
 @click.option("-j", "--workers", default=2, show_default=True, help="Parallel parse workers")
 @click.option("--device", type=click.Choice(["cpu", "mps", "cuda"]), default=None,
               help="Embedding device (overrides EMBEDDING_DEVICE env var)")
-def reindex(workers: int, device: str | None):
+@click.option("--skip-reindex", is_flag=True, help="Skip rebuilding the vector index after indexing")
+def reindex(workers: int, device: str | None, skip_reindex: bool):
     """Re-index all previously tracked files."""
     if device:
         settings.embedding_device = device
 
-    from stripes_rag.indexer import reindex_all
+    from stripes_rag.indexer import index_pending, setup_pipeline
     from stripes_rag.tracker import FileTracker
 
     tracker = FileTracker()
@@ -333,6 +499,24 @@ def reindex(workers: int, device: str | None):
         return
 
     console.print(f"Re-indexing [bold]{len(paths)}[/bold] files")
+
+    rebuild = not skip_reindex
+    rebuild_status = None
+
+    def on_rebuild(event):
+        nonlocal rebuild_status
+        if event == "start":
+            rebuild_status = console.status("[bold cyan]Rebuilding vector index...[/bold cyan]")
+            rebuild_status.start()
+        elif event == "done" and rebuild_status:
+            rebuild_status.stop()
+
+    with console.status("[bold cyan]Registering files as pending...[/bold cyan]"):
+        files = [Path(p) for p in paths if Path(p).exists()]
+        tracker.register_pending(files, force=True)
+
+    with console.status("[bold cyan]Initializing pipeline...[/bold cyan]"):
+        engine, _, vectorstore = setup_pipeline()
 
     with Progress(
         SpinnerColumn(),
@@ -345,12 +529,41 @@ def reindex(workers: int, device: str | None):
         task = progress.add_task("Re-indexing...", total=len(paths))
 
         def on_progress(file_path, done, total):
-            progress.update(task, completed=done, description=f"[cyan]{file_path.name}[/cyan]")
+            progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
 
-        results = reindex_all(workers=workers, progress_callback=on_progress)
+        def on_result(result):
+            progress.advance(task)
+
+        results = index_pending(
+            workers=workers,
+            progress_callback=on_progress,
+            result_callback=on_result,
+            engine=engine,
+            vectorstore=vectorstore,
+            rebuild_index=rebuild,
+            rebuild_callback=on_rebuild,
+        )
         progress.update(task, completed=len(paths))
 
     _print_results(results)
+
+
+@cli.command(name="rebuild-index")
+def rebuild_index_cmd():
+    """Rebuild the vector similarity index.
+
+    Drops and recreates the HNSW/IVFFlat index. Useful after bulk indexing
+    with --skip-reindex, or if you changed vector_index_type.
+    """
+    from stripes_rag.db import get_engine, init_vectorstore_table, rebuild_vector_index
+
+    engine = get_engine()
+    init_vectorstore_table(engine)
+
+    with console.status("[bold cyan]Rebuilding vector index...[/bold cyan]"):
+        rebuild_vector_index(engine)
+
+    console.print("[green]Vector index rebuilt.[/green]")
 
 
 @cli.command()
