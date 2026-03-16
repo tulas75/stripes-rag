@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS file_tracking (
 MIGRATE_ADD_STATUS = [
     "ALTER TABLE file_tracking ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'indexed'",
     "ALTER TABLE file_tracking ADD COLUMN IF NOT EXISTS error_message TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_file_tracking_status ON file_tracking (status)",
 ]
 
 
@@ -82,10 +83,136 @@ class FileTracker:
             return retry_errors
         return stored_hash != current_hash
 
-    def upsert_record(self, path: Path, chunk_count: int) -> None:
-        """Record a successfully indexed file."""
+    def register_pending(
+        self,
+        files: list[Path],
+        *,
+        force: bool = False,
+        retry_errors: bool = False,
+    ) -> tuple[int, int, int]:
+        """Mark files as pending for indexing.
+
+        Returns (new_pending, already_pending, skipped):
+        - new_pending: files newly registered as pending in this call
+        - already_pending: files that were already pending (from a previous interrupted run)
+        - skipped: files that are up-to-date or not eligible
+
+        Classification:
+        - New files: INSERT as pending
+        - Changed files (hash differs): UPDATE to pending
+        - Already pending: leave as-is (counted in already_pending)
+        - Indexed + same hash: skip (unless force)
+        - Error files: skip (unless retry_errors or force)
+        - force=True: mark pending unconditionally
+        """
+        if not files:
+            return 0, 0, 0
+
+        # Resolve all paths once
+        resolved_map: dict[str, Path] = {}
+        for f in files:
+            resolved_map[str(f.resolve())] = f
+
+        # Bulk-load existing records
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT file_path, file_hash, status FROM file_tracking "
+                "WHERE file_path = ANY(%s)",
+                (list(resolved_map.keys()),),
+            ).fetchall()
+
+        existing: dict[str, tuple[str, str]] = {
+            row[0]: (row[1], row[2]) for row in rows
+        }
+
+        # Classify files
+        to_insert: list[tuple[str, str, int]] = []  # (resolved, hash, size)
+        to_update: list[tuple[str, str, int]] = []  # (resolved, hash, size)
+        already_pending = 0
+        skipped = 0
+        now = datetime.now(timezone.utc)
+
+        for resolved, path in resolved_map.items():
+            rec = existing.get(resolved)
+
+            if rec is None:
+                # New file
+                file_hash = _sha256(path)
+                to_insert.append((resolved, file_hash, path.stat().st_size))
+            elif rec[1] == "pending" and not force:
+                # Already pending from a previous interrupted run
+                already_pending += 1
+            elif force:
+                # Force re-queue unconditionally
+                file_hash = _sha256(path)
+                to_update.append((resolved, file_hash, path.stat().st_size))
+            elif rec[1] == "error":
+                if retry_errors:
+                    file_hash = _sha256(path)
+                    to_update.append((resolved, file_hash, path.stat().st_size))
+                else:
+                    skipped += 1
+            else:
+                # status is 'indexed' — check hash
+                file_hash = _sha256(path)
+                stored_hash = rec[0]
+                if stored_hash != file_hash:
+                    to_update.append((resolved, file_hash, path.stat().st_size))
+                else:
+                    skipped += 1
+
+        # Single transaction for all writes
+        new_pending = len(to_insert) + len(to_update)
+        if new_pending:
+            with self._connect() as conn:
+                for resolved, file_hash, file_size in to_insert:
+                    conn.execute(
+                        """
+                        INSERT INTO file_tracking
+                            (file_path, file_hash, file_size, chunk_count,
+                             indexed_at, updated_at, status, error_message)
+                        VALUES (%s, %s, %s, 0, %s, %s, 'pending', NULL)
+                        ON CONFLICT (file_path) DO UPDATE SET
+                            file_hash = EXCLUDED.file_hash,
+                            file_size = EXCLUDED.file_size,
+                            updated_at = EXCLUDED.updated_at,
+                            status = 'pending',
+                            error_message = NULL
+                        """,
+                        (resolved, file_hash, file_size, now, now),
+                    )
+                for resolved, file_hash, file_size in to_update:
+                    conn.execute(
+                        """
+                        UPDATE file_tracking
+                        SET file_hash = %s, file_size = %s, updated_at = %s,
+                            status = 'pending', error_message = NULL
+                        WHERE file_path = %s
+                        """,
+                        (file_hash, file_size, now, resolved),
+                    )
+
+        return new_pending, already_pending, skipped
+
+    def pending_files(self) -> list[FileRecord]:
+        """Return all files with status='pending', ordered by path."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT file_path, file_hash, file_size, chunk_count, indexed_at, updated_at, status, error_message "
+                "FROM file_tracking WHERE status = 'pending' ORDER BY file_path"
+            ).fetchall()
+        return [FileRecord(*r) for r in rows]
+
+    def upsert_record(
+        self, path: Path, chunk_count: int, *, file_hash: str | None = None
+    ) -> None:
+        """Record a successfully indexed file.
+
+        If file_hash is provided, avoids recomputing SHA-256.
+        """
         resolved = str(path.resolve())
-        file_hash = _sha256(path)
+        if file_hash is None:
+            file_hash = _sha256(path)
         file_size = path.stat().st_size
         now = datetime.now(timezone.utc)
         with self._connect() as conn:
@@ -105,14 +232,20 @@ class FileTracker:
                 (resolved, file_hash, file_size, chunk_count, now, now),
             )
 
-    def upsert_error(self, path: Path, error_message: str) -> None:
-        """Record a file that failed to index."""
+    def upsert_error(
+        self, path: Path, error_message: str, *, file_hash: str | None = None
+    ) -> None:
+        """Record a file that failed to index.
+
+        If file_hash is provided, avoids recomputing SHA-256.
+        """
         resolved = str(path.resolve())
         try:
-            file_hash = _sha256(path)
+            if file_hash is None:
+                file_hash = _sha256(path)
             file_size = path.stat().st_size
         except OSError:
-            file_hash = ""
+            file_hash = file_hash or ""
             file_size = 0
         now = datetime.now(timezone.utc)
         with self._connect() as conn:
@@ -171,7 +304,8 @@ class FileTracker:
                     COALESCE(SUM(file_size) FILTER (WHERE status = 'indexed'), 0) as total_size,
                     MIN(indexed_at) as first_indexed,
                     MAX(updated_at) as last_updated,
-                    COUNT(*) FILTER (WHERE status = 'error') as error_count
+                    COUNT(*) FILTER (WHERE status = 'error') as error_count,
+                    COUNT(*) FILTER (WHERE status = 'pending') as pending_count
                 FROM file_tracking
                 """
             ).fetchone()
@@ -182,6 +316,7 @@ class FileTracker:
             "first_indexed": row[3],
             "last_updated": row[4],
             "error_count": row[5],
+            "pending_count": row[6],
         }
 
     def tracked_paths(self) -> list[str]:
