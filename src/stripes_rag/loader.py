@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from docling.document_converter import DocumentConverter
+
+logging.getLogger("RapidOCR").setLevel(logging.WARNING)
 from docling_core.types.doc.document import DoclingDocument
 
 
