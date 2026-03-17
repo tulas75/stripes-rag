@@ -7,6 +7,7 @@ submitted futures (workers+1) limits memory.
 
 from __future__ import annotations
 
+import multiprocessing as mp
 import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass
@@ -174,7 +175,7 @@ def _run_pipeline(
     results: list[FileResult] = []
     file_iter = iter(files_to_process)
 
-    with ProcessPoolExecutor(max_workers=workers) as pool:
+    with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn")) as pool:
         # Sliding window: keep workers+1 futures in flight
         pending: dict = {}
         for _ in range(min(workers + 1, len(files_to_process))):
