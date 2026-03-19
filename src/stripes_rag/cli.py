@@ -598,6 +598,252 @@ def reset(yes: bool):
         console.print("[dim]Is PostgreSQL running? Try: docker compose up -d[/dim]")
 
 
+def _find_postgres_container() -> str:
+    """Find the running postgres container ID."""
+    import subprocess
+
+    for image in ("pgvector/pgvector:pg17", "pgvector/pgvector"):
+        result = subprocess.run(
+            ["docker", "ps", "--filter", f"ancestor={image}", "--format", "{{.ID}}"],
+            capture_output=True, text=True,
+        )
+        container_id = result.stdout.strip().split("\n")[0].strip()
+        if container_id:
+            return container_id
+    raise click.ClickException(
+        "Could not find running postgres container. "
+        "Is Docker running? Try: docker compose up -d"
+    )
+
+
+@cli.command(name="export")
+@click.argument("file", type=click.Path(path_type=Path))
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def export_cmd(file: Path, yes: bool):
+    """Export indexed data (chunks + file tracking) to a dump file."""
+    import subprocess
+
+    import psycopg
+
+    from stripes_rag.db import TABLE_NAME
+
+    def _fmt_size(size_bytes: int | float) -> str:
+        for unit in ("B", "KB", "MB", "GB"):
+            if size_bytes < 1024:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024
+        return f"{size_bytes:.1f} TB"
+
+    try:
+        with psycopg.connect(settings.sync_connection_string) as conn:
+            chunks_count = conn.execute(
+                f'SELECT COUNT(*) FROM "{TABLE_NAME}"'
+            ).fetchone()[0]
+            files_count = conn.execute(
+                "SELECT COUNT(*) FROM file_tracking"
+            ).fetchone()[0]
+            chunks_size = conn.execute(
+                f"SELECT pg_total_relation_size('{TABLE_NAME}')"
+            ).fetchone()[0]
+            files_size = conn.execute(
+                "SELECT pg_total_relation_size('file_tracking')"
+            ).fetchone()[0]
+    except Exception as e:
+        console.print(f"[red]Cannot connect to database:[/red] {e}")
+        console.print("[dim]Is PostgreSQL running? Try: docker compose up -d[/dim]")
+        return
+
+    if chunks_count == 0 and files_count == 0:
+        console.print("[yellow]No data to export.[/yellow]")
+        return
+
+    total_size = chunks_size + files_size
+
+    table = Table(title="Export Summary", show_header=False)
+    table.add_column("Metric", style="bold")
+    table.add_column("Value")
+    table.add_row("Chunks", str(chunks_count))
+    table.add_row("Tracked files", str(files_count))
+    table.add_row("Estimated size", _fmt_size(total_size))
+    table.add_row("Output file", str(file))
+    console.print(table)
+
+    if not yes:
+        if not click.confirm("\nProceed with export?"):
+            console.print("[dim]Aborted.[/dim]")
+            return
+
+    container_id = _find_postgres_container()
+
+    with console.status("[bold cyan]Exporting...[/bold cyan]"):
+        result = subprocess.run(
+            [
+                "docker", "exec", container_id,
+                "pg_dump",
+                "-U", settings.postgres_user,
+                "-d", settings.postgres_db,
+                "-Fc",
+                f"--table={TABLE_NAME}",
+                "--table=file_tracking",
+            ],
+            capture_output=True,
+        )
+
+    if result.returncode != 0:
+        console.print(f"[red]pg_dump failed:[/red] {result.stderr.decode()}")
+        return
+
+    file.write_bytes(result.stdout)
+    file_size = file.stat().st_size
+
+    console.print(
+        f"[green]\u2713[/green] Exported to [cyan]{file}[/cyan] ({_fmt_size(file_size)})"
+    )
+
+
+@cli.command(name="import")
+@click.argument("file", type=click.Path(exists=True, path_type=Path))
+@click.option("--replace", is_flag=True, help="Clear existing data before import (default: merge)")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def import_cmd(file: Path, replace: bool, yes: bool):
+    """Import indexed data from a dump file.
+
+    Default mode merges data (skips existing rows).
+    Use --replace to clear all data and restore from the dump.
+    """
+    import subprocess
+
+    import psycopg
+
+    from stripes_rag.db import TABLE_NAME, get_engine, init_vectorstore_table, rebuild_vector_index
+
+    def _fmt_size(size_bytes: int | float) -> str:
+        for unit in ("B", "KB", "MB", "GB"):
+            if size_bytes < 1024:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024
+        return f"{size_bytes:.1f} TB"
+
+    file_size = file.stat().st_size
+
+    try:
+        with psycopg.connect(settings.sync_connection_string) as conn:
+            chunks_count = conn.execute(
+                f'SELECT COUNT(*) FROM "{TABLE_NAME}"'
+            ).fetchone()[0]
+            files_count = conn.execute(
+                "SELECT COUNT(*) FROM file_tracking"
+            ).fetchone()[0]
+    except Exception as e:
+        console.print(f"[red]Cannot connect to database:[/red] {e}")
+        console.print("[dim]Is PostgreSQL running? Try: docker compose up -d[/dim]")
+        return
+
+    table = Table(title="Import Summary", show_header=False)
+    table.add_column("Metric", style="bold")
+    table.add_column("Value")
+    table.add_row("Dump file", str(file))
+    table.add_row("File size", _fmt_size(file_size))
+    table.add_row("Existing chunks", str(chunks_count))
+    table.add_row("Existing files", str(files_count))
+    table.add_row(
+        "Mode",
+        "[red]replace[/red] (clear + restore)" if replace else "merge (skip duplicates)",
+    )
+    console.print(table)
+
+    if replace and (chunks_count > 0 or files_count > 0):
+        console.print(
+            f"\n[bold red]\u26a0  WARNING:[/bold red] Replace mode will delete all "
+            f"{chunks_count} chunks and {files_count} file records before importing."
+        )
+
+    if not yes:
+        if not click.confirm("\nProceed with import?"):
+            console.print("[dim]Aborted.[/dim]")
+            return
+
+    container_id = _find_postgres_container()
+
+    if replace:
+        restore_args = [
+            "docker", "exec", "-i", container_id,
+            "pg_restore",
+            "-U", settings.postgres_user,
+            "-d", settings.postgres_db,
+            "--clean", "--if-exists",
+            "--no-owner", "--no-acl",
+        ]
+    else:
+        # Ensure tables exist before data-only restore
+        engine = get_engine()
+        init_vectorstore_table(engine)
+        from stripes_rag.tracker import FileTracker
+        FileTracker()
+
+        restore_args = [
+            "docker", "exec", "-i", container_id,
+            "pg_restore",
+            "-U", settings.postgres_user,
+            "-d", settings.postgres_db,
+            "--data-only", "--disable-triggers",
+            "--no-owner", "--no-acl",
+        ]
+
+    with console.status("[bold cyan]Importing...[/bold cyan]"):
+        with open(file, "rb") as f:
+            result = subprocess.run(restore_args, stdin=f, capture_output=True)
+
+    if result.returncode != 0:
+        stderr = result.stderr.decode()
+        if replace:
+            console.print(f"[red]pg_restore failed:[/red] {stderr}")
+            return
+        else:
+            # In merge mode, duplicate key errors are expected
+            lines = [
+                l for l in stderr.strip().splitlines()
+                if "duplicate key" not in l.lower()
+                and "already exists" not in l.lower()
+            ]
+            if lines:
+                console.print(f"[yellow]pg_restore warnings:[/yellow]")
+                for line in lines[:10]:
+                    console.print(f"  [dim]{line}[/dim]")
+
+    with console.status("[bold cyan]Rebuilding vector index...[/bold cyan]"):
+        if replace:
+            engine = get_engine()
+            init_vectorstore_table(engine)
+        rebuild_vector_index(engine)
+
+    # Report final counts
+    try:
+        with psycopg.connect(settings.sync_connection_string) as conn:
+            new_chunks = conn.execute(
+                f'SELECT COUNT(*) FROM "{TABLE_NAME}"'
+            ).fetchone()[0]
+            new_files = conn.execute(
+                "SELECT COUNT(*) FROM file_tracking"
+            ).fetchone()[0]
+    except Exception:
+        console.print("[green]\u2713[/green] Import complete.")
+        return
+
+    if replace:
+        console.print(
+            f"[green]\u2713[/green] Restored {new_chunks} chunks and {new_files} tracked files"
+        )
+    else:
+        added_chunks = new_chunks - chunks_count
+        added_files = new_files - files_count
+        console.print(
+            f"[green]\u2713[/green] Imported {added_chunks} new chunks and "
+            f"{added_files} new file records "
+            f"(total: {new_chunks} chunks, {new_files} files)"
+        )
+
+
 def _print_results(results):
     """Print a summary table of indexing results."""
     indexed = [r for r in results if r.status == "indexed"]

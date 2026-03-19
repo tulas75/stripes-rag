@@ -152,6 +152,34 @@ Rebuild the vector similarity index. Useful after running `index` or `reindex` w
 stripes rebuild-index
 ```
 
+### `stripes export <file>`
+
+Export indexed data (chunks + file tracking) to a PostgreSQL custom-format dump file. Runs `pg_dump` inside the Docker postgres container.
+
+```bash
+stripes export backup.dump          # interactive confirmation
+stripes export backup.dump -y       # skip confirmation
+```
+
+| Flag | Description |
+|------|-------------|
+| `-y, --yes` | Skip confirmation prompt |
+
+### `stripes import <file>`
+
+Import indexed data from a dump file. Default mode merges (skips existing rows). Use `--replace` to clear all data and restore from the dump.
+
+```bash
+stripes import backup.dump             # merge: skip duplicates
+stripes import backup.dump --replace   # clear + full restore
+stripes import backup.dump -y          # skip confirmation
+```
+
+| Flag | Description |
+|------|-------------|
+| `--replace` | Clear existing data before import (default: merge) |
+| `-y, --yes` | Skip confirmation prompt |
+
 ### `stripes reset`
 
 Drop all indexed data (vectors and tracking records).
