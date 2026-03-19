@@ -1,13 +1,23 @@
-"""HuggingFaceEmbeddings wrapper configured for EmbeddingGemma on MPS."""
+"""Embeddings wrapper — local sentence-transformers or remote TEI server."""
 
 from __future__ import annotations
 
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
 
 from stripes_rag.config import settings
 
 
-def get_embeddings() -> HuggingFaceEmbeddings:
+def get_embeddings() -> Embeddings:
+    if settings.embedding_server_url:
+        from langchain_huggingface import HuggingFaceEndpointEmbeddings
+
+        return HuggingFaceEndpointEmbeddings(
+            model=settings.embedding_server_url,
+        )
+
+    # Local sentence-transformers (default)
+    from langchain_huggingface import HuggingFaceEmbeddings
+
     kwargs = {
         "model_name": settings.embedding_model,
         "model_kwargs": {

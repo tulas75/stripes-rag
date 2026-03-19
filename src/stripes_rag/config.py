@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-m3"
     embedding_device: str = "cpu"
     embedding_batch_size: int = 64
+    embedding_server_url: str | None = None  # e.g. "http://localhost:8080"
 
     # Chunking
     chunk_max_tokens: int = 512

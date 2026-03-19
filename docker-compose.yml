@@ -29,3 +29,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    ports:
+      - "${TEI_PORT:-8080}:80"
+    volumes:
+      - tei-models:/data
+    environment:
+      - MODEL_ID=${EMBEDDING_MODEL:-BAAI/bge-m3}
+    profiles:
+      - tei
+
+volumes:
+  tei-models:
