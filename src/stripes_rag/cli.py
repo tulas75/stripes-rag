@@ -599,19 +599,23 @@ def reset(yes: bool):
 
 
 def _find_postgres_container() -> str:
-    """Find the running postgres container ID."""
+    """Find the running postgres container by its published port."""
     import subprocess
 
-    for image in ("pgvector/pgvector:pg17", "pgvector/pgvector"):
-        result = subprocess.run(
-            ["docker", "ps", "--filter", f"ancestor={image}", "--format", "{{.ID}}"],
-            capture_output=True, text=True,
-        )
-        container_id = result.stdout.strip().split("\n")[0].strip()
-        if container_id:
-            return container_id
+    host_port = str(settings.postgres_port)
+    result = subprocess.run(
+        [
+            "docker", "ps",
+            "--filter", "publish=" + host_port,
+            "--format", "{{.ID}}",
+        ],
+        capture_output=True, text=True,
+    )
+    container_id = result.stdout.strip().split("\n")[0].strip()
+    if container_id:
+        return container_id
     raise click.ClickException(
-        "Could not find running postgres container. "
+        f"Could not find running container publishing port {host_port}. "
         "Is Docker running? Try: docker compose up -d"
     )
 
