@@ -640,19 +640,28 @@ def export_cmd(file: Path, yes: bool):
 
     try:
         with psycopg.connect(settings.sync_connection_string) as conn:
+            # Check which tables exist
+            existing = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                    "AND tablename IN (%s, 'file_tracking')",
+                    (TABLE_NAME,),
+                ).fetchall()
+            }
             chunks_count = conn.execute(
                 f'SELECT COUNT(*) FROM "{TABLE_NAME}"'
-            ).fetchone()[0]
+            ).fetchone()[0] if TABLE_NAME in existing else 0
             files_count = conn.execute(
                 "SELECT COUNT(*) FROM file_tracking"
-            ).fetchone()[0]
+            ).fetchone()[0] if "file_tracking" in existing else 0
             chunks_size = conn.execute(
                 f"SELECT pg_total_relation_size('{TABLE_NAME}')"
-            ).fetchone()[0]
+            ).fetchone()[0] if TABLE_NAME in existing else 0
             files_size = conn.execute(
                 "SELECT pg_total_relation_size('file_tracking')"
-            ).fetchone()[0]
-    except Exception as e:
+            ).fetchone()[0] if "file_tracking" in existing else 0
+    except psycopg.OperationalError as e:
         console.print(f"[red]Cannot connect to database:[/red] {e}")
         console.print("[dim]Is PostgreSQL running? Try: docker compose up -d[/dim]")
         return
@@ -734,13 +743,21 @@ def import_cmd(file: Path, replace: bool, yes: bool):
 
     try:
         with psycopg.connect(settings.sync_connection_string) as conn:
+            existing = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+                    "AND tablename IN (%s, 'file_tracking')",
+                    (TABLE_NAME,),
+                ).fetchall()
+            }
             chunks_count = conn.execute(
                 f'SELECT COUNT(*) FROM "{TABLE_NAME}"'
-            ).fetchone()[0]
+            ).fetchone()[0] if TABLE_NAME in existing else 0
             files_count = conn.execute(
                 "SELECT COUNT(*) FROM file_tracking"
-            ).fetchone()[0]
-    except Exception as e:
+            ).fetchone()[0] if "file_tracking" in existing else 0
+    except psycopg.OperationalError as e:
         console.print(f"[red]Cannot connect to database:[/red] {e}")
         console.print("[dim]Is PostgreSQL running? Try: docker compose up -d[/dim]")
         return
