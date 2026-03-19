@@ -262,6 +262,16 @@ Documents are split using Docling's **HybridChunker**, which combines structural
 
 4. **`chunker.serialize(chunk)`** prepends heading context to the chunk text, so each chunk is self-contained — a paragraph deep in section 3.2.1 carries its full heading path in the text that gets embedded.
 
+### Chunk size outcomes
+
+```
+Document
+  → HybridChunker (target: 512 tokens)
+    → most chunks: ≤512 tokens ✓
+    → some chunks: 513–32768 chars (oversized atomic blocks) → passed through, bge-m3 handles up to 8192 tokens
+    → rare chunks: >32768 chars → force-split into sub-chunks of 32768 chars (~8192 tokens each)
+```
+
 ### Metadata extraction
 
 Each chunk carries structured metadata extracted from Docling's provenance data:
