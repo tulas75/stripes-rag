@@ -678,7 +678,9 @@ def export_cmd(file: Path, yes: bool):
     with console.status("[bold cyan]Exporting...[/bold cyan]"):
         result = subprocess.run(
             [
-                "docker", "exec", container_id,
+                "docker", "exec",
+                "-e", f"PGPASSWORD={settings.postgres_password}",
+                container_id,
                 "pg_dump",
                 "-U", settings.postgres_user,
                 "-d", settings.postgres_db,
@@ -765,9 +767,15 @@ def import_cmd(file: Path, replace: bool, yes: bool):
 
     container_id = _find_postgres_container()
 
+    docker_exec_prefix = [
+        "docker", "exec",
+        "-e", f"PGPASSWORD={settings.postgres_password}",
+        "-i", container_id,
+    ]
+
     if replace:
         restore_args = [
-            "docker", "exec", "-i", container_id,
+            *docker_exec_prefix,
             "pg_restore",
             "-U", settings.postgres_user,
             "-d", settings.postgres_db,
@@ -782,7 +790,7 @@ def import_cmd(file: Path, replace: bool, yes: bool):
         FileTracker()
 
         restore_args = [
-            "docker", "exec", "-i", container_id,
+            *docker_exec_prefix,
             "pg_restore",
             "-U", settings.postgres_user,
             "-d", settings.postgres_db,
