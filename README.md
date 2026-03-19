@@ -6,7 +6,7 @@ A CLI tool and web interface for indexing documents (PDF, DOCX, XLSX, PPTX, HTML
 
 - **Document parsing** with [Docling](https://github.com/DS4SD/docling) — layout-aware extraction from PDF, DOCX, XLSX, PPTX, HTML, and MD files
 - **Hybrid chunking** — structural + semantic chunking with heading and page number metadata
-- **Embedding** with [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) (1024-dim, multilingual)
+- **Embedding** with [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) (1024-dim, multilingual) — local or via remote [TEI](https://github.com/huggingface/text-embeddings-inference) server
 - **pgvector storage** — HNSW or IVFFlat indexing for fast similarity search
 - **Crash-safe resumability** — pending state tracking with per-file atomic commits; interrupted runs resume from where they left off
 - **Parallel processing** — `ProcessPoolExecutor` for parsing/chunking with configurable worker count
@@ -174,11 +174,44 @@ All settings are managed via environment variables (or `.env` file):
 | `EMBEDDING_MODEL` | `BAAI/bge-m3` | HuggingFace embedding model |
 | `EMBEDDING_DEVICE` | `cpu` | Compute device (`cpu`, `mps`, `cuda`) |
 | `EMBEDDING_BATCH_SIZE` | `64` | Embedding batch size |
+| `EMBEDDING_SERVER_URL` | *(unset)* | TEI server URL (omit for local sentence-transformers) |
 | `CHUNK_MAX_TOKENS` | `512` | Max tokens per chunk |
 | `INDEX_BATCH_SIZE` | `128` | DB insertion batch size |
 | `VECTOR_INDEX_TYPE` | `hnsw` | `hnsw` (high recall) or `ivfflat` (faster build) |
 
 For the Streamlit chat app, additional API keys can be set for LLM providers (DeepSeek, Mistral, Fireworks, etc.).
+
+## Embedding Server (TEI)
+
+By default, embeddings are computed locally with sentence-transformers. You can optionally offload embedding to a [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) (TEI) server — useful for dedicating GPU resources, sharing the model across services, or keeping the indexing machine lightweight.
+
+### Start TEI
+
+The docker-compose file includes an opt-in TEI service:
+
+```bash
+docker compose --profile tei up -d
+```
+
+This starts TEI on port 8080 (configurable via `TEI_PORT`) serving the same `BAAI/bge-m3` model.
+
+### Point stripes-rag at TEI
+
+Add to your `.env`:
+
+```
+EMBEDDING_SERVER_URL=http://localhost:8080
+```
+
+That's it — both the CLI indexer and the Streamlit app will use TEI for embeddings. Remove the variable to switch back to local.
+
+### Batch size
+
+TEI limits how many texts it accepts per request (`--max-client-batch-size`, default 32). The client automatically splits requests into batches of `EMBEDDING_BATCH_SIZE` (default 64). If you hit batch size errors, either lower `EMBEDDING_BATCH_SIZE` or increase TEI's `--max-client-batch-size`.
+
+### Important
+
+The TEI model must produce the same embedding dimensions (1024 for bge-m3) as the local model. Mixing models between indexing and search will produce incorrect results.
 
 ## Architecture
 
@@ -199,7 +232,7 @@ PDF, DOCX, XLSX, PPTX, HTML, or MD files
 ┌─────────────────────────┐
 │  Main thread             │
 │  ┌───────────────────┐  │
-│  │ bge-m3 embedding   │  │
+│  │ bge-m3 embedding   │──┼──→ local or TEI server
 │  │ PGVectorStore      │  │
 │  │ FileTracker commit  │  │
 │  └───────────────────┘  │
