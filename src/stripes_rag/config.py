@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # Vector index type: "hnsw" (default, high recall) or "ivfflat" (faster build, large datasets)
     vector_index_type: Literal["hnsw", "ivfflat"] = "hnsw"
 
+    # Reranker (optional)
+    reranker_url: str | None = None          # e.g. "http://localhost:8081"
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    reranker_top_k_multiplier: int = 3       # retrieve k*N candidates, rerank to k
+
     @property
     def async_connection_string(self) -> str:
         """For PGEngine (SQLAlchemy async via asyncpg)."""

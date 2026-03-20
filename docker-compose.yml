@@ -41,5 +41,17 @@ services:
     profiles:
       - tei
 
+  tei-reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    ports:
+      - "${RERANKER_PORT:-8081}:80"
+    volumes:
+      - reranker-models:/data
+    environment:
+      - MODEL_ID=${RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}
+    profiles:
+      - reranker
+
 volumes:
   tei-models:
+  reranker-models:

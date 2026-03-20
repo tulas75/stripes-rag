@@ -10,6 +10,7 @@ A CLI tool and web interface for indexing documents (PDF, DOCX, XLSX, PPTX, HTML
 - **pgvector storage** — HNSW or IVFFlat indexing for fast similarity search
 - **Crash-safe resumability** — pending state tracking with per-file atomic commits; interrupted runs resume from where they left off
 - **Parallel processing** — `ProcessPoolExecutor` for parsing/chunking with configurable worker count
+- **Optional reranker** — cross-encoder reranking via [TEI](https://github.com/huggingface/text-embeddings-inference) for higher-precision results (graceful fallback when unavailable)
 - **Streamlit chat UI** — interactive RAG chat with multiple LLM providers via LiteLLM and smolagents
 
 ## Prerequisites
@@ -114,6 +115,8 @@ Run a semantic search against indexed documents.
 | `-k N` | Number of results (default: 5) |
 | `--file PATH` | Filter by source file path |
 
+When a reranker is configured (`RERANKER_URL`), the search command over-fetches `k * RERANKER_TOP_K_MULTIPLIER` candidates, reranks them with the cross-encoder, and returns the top `k`. Results display the reranker relevance score instead of the vector similarity score.
+
 ### `stripes status`
 
 Show indexing statistics — file counts (indexed, pending, errored), chunk totals, and timestamps.
@@ -206,6 +209,9 @@ All settings are managed via environment variables (or `.env` file):
 | `CHUNK_MAX_TOKENS` | `512` | Max tokens per chunk |
 | `INDEX_BATCH_SIZE` | `128` | DB insertion batch size |
 | `VECTOR_INDEX_TYPE` | `hnsw` | `hnsw` (high recall) or `ivfflat` (faster build) |
+| `RERANKER_URL` | *(unset)* | TEI reranker server URL (omit to disable reranking) |
+| `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Cross-encoder model for reranking |
+| `RERANKER_TOP_K_MULTIPLIER` | `3` | Over-fetch multiplier (retrieve `k * N` candidates, rerank to `k`) |
 
 For the Streamlit chat app, additional API keys can be set for LLM providers (DeepSeek, Mistral, Fireworks, etc.).
 
@@ -240,6 +246,41 @@ TEI limits how many texts it accepts per request (`--max-client-batch-size`, def
 ### Important
 
 The TEI model must produce the same embedding dimensions (1024 for bge-m3) as the local model. Mixing models between indexing and search will produce incorrect results.
+
+## Reranker (optional)
+
+A **reranker** is a cross-encoder model that rescores vector search candidates by jointly encoding the query and each document. This produces more accurate relevance scores than embedding similarity alone, at the cost of an extra inference step.
+
+The pipeline: retrieve `k * multiplier` candidates via vector search, rerank with the cross-encoder, return top `k`.
+
+### Start the reranker
+
+The docker-compose file includes an opt-in TEI reranker service:
+
+```bash
+docker compose --profile reranker up -d
+```
+
+This starts a second TEI instance on port 8081 (configurable via `RERANKER_PORT`) serving `BAAI/bge-reranker-v2-m3`.
+
+### Enable reranking
+
+Add to your `.env`:
+
+```
+RERANKER_URL=http://localhost:8081
+```
+
+Both the CLI (`stripes search`) and the Streamlit app will use the reranker. Remove the variable to disable it.
+
+### Graceful fallback
+
+If `RERANKER_URL` is set but the service is unreachable (e.g., container is down), both the CLI and the Streamlit app log a warning and fall back to plain vector similarity results. No errors are raised.
+
+### Tuning
+
+- `RERANKER_TOP_K_MULTIPLIER` (default: 3) controls over-fetching. With `-k 5`, the system retrieves 15 candidates and reranks to 5. Higher values improve recall but increase latency.
+- The Streamlit sidebar includes a **Reranker** checkbox to toggle reranking on/off at runtime (only enabled when `RERANKER_URL` is set).
 
 ## Architecture
 
@@ -358,6 +399,7 @@ The web interface (`app.py`) provides:
 - **Multiple RAG profiles**: Classic RAG, Project Architect, Study Companion
 - **Model selection**: Ollama, DeepSeek, Mistral, DeepInfra, Groq, and more via LiteLLM
 - **Language toggle**: Italian / English
+- **Reranker toggle**: Enable/disable cross-encoder reranking from the sidebar
 - **Source references**: Expandable sections showing retrieved chunks with similarity scores
 - **Auto-generated follow-up questions**
 
@@ -374,6 +416,7 @@ src/stripes_rag/
 ├── db.py           # PGEngine + vectorstore init
 ├── tracker.py      # SHA-256 file change tracking
 ├── embeddings.py   # HuggingFace embeddings wrapper
+├── reranker.py     # Optional cross-encoder reranker via TEI
 ├── loader.py       # Docling DocumentConverter
 ├── chunker.py      # HybridChunker + metadata extraction
 ├── indexer.py       # Pipeline orchestration

@@ -259,6 +259,7 @@ def search(query: str, k: int, source_file: str | None):
     """Semantic search across indexed documents."""
     from stripes_rag.db import get_engine, get_vectorstore, init_vectorstore_table
     from stripes_rag.embeddings import get_embeddings
+    from stripes_rag.reranker import rerank
 
     engine = get_engine()
     init_vectorstore_table(engine)
@@ -270,17 +271,31 @@ def search(query: str, k: int, source_file: str | None):
         resolved = str(Path(source_file).resolve())
         filter_dict = {"source_file": resolved}
 
+    use_reranker = settings.reranker_url is not None
+    k_fetch = k * settings.reranker_top_k_multiplier if use_reranker else k
+
     with console.status("[bold cyan]Searching...[/bold cyan]"):
         results = vectorstore.similarity_search_with_score(
-            query, k=k, filter=filter_dict
+            query, k=k_fetch, filter=filter_dict
         )
+
+        if use_reranker:
+            results = rerank(query, results, top_k=k)
 
     if not results:
         console.print("[yellow]No results found.[/yellow]")
         return
 
-    for i, (doc, distance) in enumerate(results, 1):
-        similarity = 1.0 - distance
+    reranked = use_reranker and len(results) > 0
+
+    for i, (doc, score) in enumerate(results, 1):
+        if reranked:
+            score_label = "Reranker"
+            score_value = f"{score:.4f}"
+        else:
+            score_label = "Similarity"
+            score_value = f"{1.0 - score:.4f}"
+
         meta = doc.metadata
         source = Path(meta.get("source_file", "unknown")).name
         pages = meta.get("page_numbers", "?")
@@ -294,7 +309,7 @@ def search(query: str, k: int, source_file: str | None):
         )
         table.add_column("Field", style="dim")
         table.add_column("Value")
-        table.add_row("Similarity", f"{similarity:.4f}")
+        table.add_row(score_label, score_value)
         table.add_row("Source", source)
         table.add_row("Pages", str(pages))
         if headings:

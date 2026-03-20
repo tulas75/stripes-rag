@@ -73,6 +73,19 @@ with st.sidebar:
     max_steps = st.slider("Agent max steps", 2, 10, 6)
 
     st.divider()
+
+    # Reranker toggle
+    from stripes_rag.config import settings as _settings
+    _reranker_available = _settings.reranker_url is not None
+    use_reranker = st.checkbox(
+        "Reranker",
+        value=_reranker_available,
+        disabled=not _reranker_available,
+        help="Cross-encoder reranking via TEI (requires RERANKER_URL)" if _reranker_available
+             else "Set RERANKER_URL to enable",
+    )
+
+    st.divider()
     st.caption("Stripes RAG v0.1")
 
 
@@ -115,10 +128,11 @@ class RetrieverTool(Tool):
     }
     output_type = "string"
 
-    def __init__(self, vectorstore, k: int = 10, **kwargs):
+    def __init__(self, vectorstore, k: int = 10, use_reranker: bool = False, **kwargs):
         super().__init__(**kwargs)
         self.vectorstore = vectorstore
         self.k = k
+        self.use_reranker = use_reranker
         self.retrieved_chunks = []
         self.retrieval_time: float = 0.0
         self.retrieval_calls: int = 0
@@ -126,16 +140,25 @@ class RetrieverTool(Tool):
     def forward(self, query: str) -> str:
         import time as _time
 
+        from stripes_rag.config import settings as _settings
+        from stripes_rag.reranker import rerank
+
         assert isinstance(query, str), "Your search query must be a string"
 
+        k_fetch = self.k * _settings.reranker_top_k_multiplier if self.use_reranker else self.k
+
         _t0 = _time.perf_counter()
-        docs_with_scores = self.vectorstore.similarity_search_with_score(query, k=self.k)
+        docs_with_scores = self.vectorstore.similarity_search_with_score(query, k=k_fetch)
+
+        if self.use_reranker:
+            docs_with_scores = rerank(query, docs_with_scores, top_k=self.k)
+
         self.retrieval_time += _time.perf_counter() - _t0
         self.retrieval_calls += 1
 
         result = "\nRetrieved documents:\n"
         for i, (doc, score) in enumerate(docs_with_scores):
-            similarity = 1 - score
+            similarity = 1 - score if not self.use_reranker else score
             source = doc.metadata.get("source_file", "unknown")
             headings = doc.metadata.get("headings", "")
             pages = doc.metadata.get("page_numbers", "")
@@ -254,7 +277,7 @@ if prompt or needs_response:
 
             from smolagents import CodeAgent, LiteLLMModel
 
-            retriever_tool = RetrieverTool(vectorstore, k=k_results)
+            retriever_tool = RetrieverTool(vectorstore, k=k_results, use_reranker=use_reranker)
 
             agent = CodeAgent(
                 tools=[retriever_tool],
