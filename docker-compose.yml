@@ -1,6 +1,7 @@
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    shm_size: 4g
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
@@ -22,7 +23,9 @@ services:
       - "${STREAMLIT_PORT:-8501}:8501"
     env_file: .env
     environment:
+      # Override .env for Docker-internal networking (always port 5432 container-to-container)
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
       EMBEDDING_DEVICE: cpu
     volumes:
       - ${DOCUMENTS_PATH:-./docs}:/docs

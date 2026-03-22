@@ -200,7 +200,7 @@ All settings are managed via environment variables (or `.env` file):
 | `POSTGRES_USER` | `stripes` | PostgreSQL user |
 | `POSTGRES_PASSWORD` | `stripes` | PostgreSQL password |
 | `POSTGRES_HOST` | `localhost` | PostgreSQL host |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port (host-published; inside Docker the app connects on 5432 automatically) |
 | `POSTGRES_DB` | `stripes_rag` | Database name |
 | `EMBEDDING_PROVIDER` | `local` | `local` (sentence-transformers) or `litellm` (TEI, DeepInfra, OpenAI, Cohere, etc.) |
 | `EMBEDDING_MODEL` | `BAAI/bge-m3` | Embedding model name. For LiteLLM use `openai/<model>` with `EMBEDDING_API_BASE`. |
