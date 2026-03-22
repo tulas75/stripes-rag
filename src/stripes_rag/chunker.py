@@ -25,11 +25,19 @@ _chunker: HybridChunker | None = None
 _MAX_CHUNK_CHARS = 8192 * 4
 
 
+def _hf_tokenizer_name() -> str:
+    """Strip LiteLLM provider prefix (e.g. 'openai/') to get a bare HF repo id."""
+    name = settings.embedding_model
+    if settings.embedding_provider == "litellm" and name.count("/") >= 2:
+        name = name.split("/", 1)[1]
+    return name
+
+
 def get_chunker() -> HybridChunker:
     global _chunker
     if _chunker is None:
         tokenizer = HuggingFaceTokenizer.from_pretrained(
-            settings.embedding_model,
+            _hf_tokenizer_name(),
             max_tokens=settings.chunk_max_tokens,
         )
         _chunker = HybridChunker(tokenizer=tokenizer)
