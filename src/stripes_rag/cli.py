@@ -257,12 +257,11 @@ def scan(directory: Path, recursive: bool, force: bool, retry_errors: bool, dry_
 @click.option("--file", "source_file", default=None, help="Filter by source file path")
 def search(query: str, k: int, source_file: str | None):
     """Semantic search across indexed documents."""
-    from stripes_rag.db import get_engine, get_vectorstore, init_vectorstore_table
+    from stripes_rag.db import get_engine, get_vectorstore
     from stripes_rag.embeddings import get_embeddings
     from stripes_rag.reranker import rerank
 
     engine = get_engine()
-    init_vectorstore_table(engine)
     embeddings = get_embeddings()
     vectorstore = get_vectorstore(engine, embeddings)
 
@@ -279,24 +278,20 @@ def search(query: str, k: int, source_file: str | None):
             query, k=k_fetch, filter=filter_dict
         )
 
+        reranked = False
         if use_reranker:
-            results = rerank(query, results, top_k=k)
+            for doc, distance in results:
+                doc.metadata['_vector_distance'] = distance
+            results, reranked = rerank(query, results, top_k=k)
 
     if not results:
         console.print("[yellow]No results found.[/yellow]")
         return
 
-    reranked = use_reranker and len(results) > 0
-
     for i, (doc, score) in enumerate(results, 1):
-        if reranked:
-            score_label = "Reranker"
-            score_value = f"{score:.4f}"
-        else:
-            score_label = "Similarity"
-            score_value = f"{1.0 - score:.4f}"
-
         meta = doc.metadata
+        vector_sim = 1 - meta.pop('_vector_distance', 1 - score) if reranked else 1 - score
+
         source = Path(meta.get("source_file", "unknown")).name
         pages = meta.get("page_numbers", "?")
         headings = meta.get("headings", "")
@@ -309,7 +304,9 @@ def search(query: str, k: int, source_file: str | None):
         )
         table.add_column("Field", style="dim")
         table.add_column("Value")
-        table.add_row(score_label, score_value)
+        if reranked:
+            table.add_row("Reranker", f"{score:.4f}")
+        table.add_row("Similarity", f"{vector_sim:.4f}")
         table.add_row("Source", source)
         table.add_row("Pages", str(pages))
         if headings:

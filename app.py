@@ -69,7 +69,7 @@ with st.sidebar:
     language = LANGUAGES[selected_lang]
 
     temperature = st.slider("Temperature", 0.0, 1.0, 0.3, 0.05)
-    k_results = st.slider("Retrieval depth (k)", 3, 20, 10)
+    k_results = st.slider("Retrieval depth (k)", 3, 10, 5)
     max_steps = st.slider("Agent max steps", 2, 10, 6)
 
     st.divider()
@@ -94,11 +94,10 @@ with st.sidebar:
 # ---------------------------------------------------------------------------
 @st.cache_resource(show_spinner="Loading embedding model & vectorstore…")
 def load_vectorstore():
-    from stripes_rag.db import get_engine, get_vectorstore, init_vectorstore_table
+    from stripes_rag.db import get_engine, get_vectorstore
     from stripes_rag.embeddings import get_embeddings
 
     engine = get_engine()
-    init_vectorstore_table(engine)
     embeddings = get_embeddings()
     return get_vectorstore(engine, embeddings)
 
@@ -150,22 +149,28 @@ class RetrieverTool(Tool):
         _t0 = _time.perf_counter()
         docs_with_scores = self.vectorstore.similarity_search_with_score(query, k=k_fetch)
 
+        reranked = False
         if self.use_reranker:
-            docs_with_scores = rerank(query, docs_with_scores, top_k=self.k)
+            for doc, distance in docs_with_scores:
+                doc.metadata['_vector_distance'] = distance
+            docs_with_scores, reranked = rerank(query, docs_with_scores, top_k=self.k)
 
         self.retrieval_time += _time.perf_counter() - _t0
         self.retrieval_calls += 1
 
         result = "\nRetrieved documents:\n"
         for i, (doc, score) in enumerate(docs_with_scores):
-            similarity = 1 - score if not self.use_reranker else score
+            vector_sim = 1 - doc.metadata.pop('_vector_distance', 1 - score) if reranked else 1 - score
+            reranker_score = score if reranked else None
+            similarity = reranker_score if reranker_score is not None else vector_sim
             source = doc.metadata.get("source_file", "unknown")
             headings = doc.metadata.get("headings", "")
             pages = doc.metadata.get("page_numbers", "")
-            
+
             self.retrieved_chunks.append({
                 "source": source,
-                "similarity": similarity,
+                "similarity": vector_sim,
+                "reranker_score": reranker_score,
                 "headings": headings,
                 "pages": pages,
                 "content": doc.page_content
@@ -235,7 +240,10 @@ for msg_idx, msg in enumerate(st.session_state.messages):
                             st.markdown(f"**Pages:** {chunk['pages']}")
                         if chunk['headings']:
                             st.markdown(f"**Headings:** {chunk['headings']}")
-                        st.caption(f"Similarity: {chunk['similarity']:.4f}")
+                        if chunk.get("reranker_score") is not None:
+                            st.caption(f"Reranker: {chunk['reranker_score']:.4f} · Similarity: {chunk['similarity']:.4f}")
+                        else:
+                            st.caption(f"Similarity: {chunk['similarity']:.4f}")
                         st.markdown("---")
                         st.markdown(chunk['content'])
         if msg.get("follow_ups"):
@@ -305,7 +313,10 @@ if prompt or needs_response:
                     if c["content"] not in seen_contents:
                         seen_contents.add(c["content"])
                         unique_chunks.append(c)
-                unique_chunks.sort(key=lambda c: c["similarity"], reverse=True)
+                if any(c.get("reranker_score") is not None for c in unique_chunks):
+                    unique_chunks.sort(key=lambda c: c["reranker_score"], reverse=True)
+                else:
+                    unique_chunks.sort(key=lambda c: c["similarity"], reverse=True)
 
             except Exception as e:
                 answer = f"❌ **Error:** {e}"
@@ -330,7 +341,10 @@ if prompt or needs_response:
                             st.markdown(f"**Pages:** {chunk['pages']}")
                         if chunk['headings']:
                             st.markdown(f"**Headings:** {chunk['headings']}")
-                        st.caption(f"Similarity: {chunk['similarity']:.4f}")
+                        if chunk.get("reranker_score") is not None:
+                            st.caption(f"Reranker: {chunk['reranker_score']:.4f} · Similarity: {chunk['similarity']:.4f}")
+                        else:
+                            st.caption(f"Similarity: {chunk['similarity']:.4f}")
                         st.markdown("---")
                         st.markdown(chunk['content'])
         if follow_ups:

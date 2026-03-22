@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     reranker_url: str | None = None          # e.g. "http://localhost:8081"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     reranker_top_k_multiplier: int = 3       # retrieve k*N candidates, rerank to k
+    reranker_timeout: float = 120.0           # seconds; CPU reranking can be slow
+    reranker_batch_size: int = 64             # TEI max batch size
 
     @property
     def async_connection_string(self) -> str:
