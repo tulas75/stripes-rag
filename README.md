@@ -6,11 +6,11 @@ A CLI tool and web interface for indexing documents (PDF, DOCX, XLSX, PPTX, HTML
 
 - **Document parsing** with [Docling](https://github.com/DS4SD/docling) — layout-aware extraction from PDF, DOCX, XLSX, PPTX, HTML, and MD files
 - **Hybrid chunking** — structural + semantic chunking with heading and page number metadata
-- **Embedding** with [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) (1024-dim, multilingual) — local or via remote [TEI](https://github.com/huggingface/text-embeddings-inference) server
+- **Embedding** with [BAAI/bge-m3](https://huggingface.co/BAAI/bge-m3) (1024-dim, multilingual) — local sentence-transformers, remote [TEI](https://github.com/huggingface/text-embeddings-inference) server, or any provider via [LiteLLM](https://github.com/BerriAI/litellm) (DeepInfra, OpenAI, Cohere, etc.)
 - **pgvector storage** — HNSW or IVFFlat indexing for fast similarity search
 - **Crash-safe resumability** — pending state tracking with per-file atomic commits; interrupted runs resume from where they left off
 - **Parallel processing** — `ProcessPoolExecutor` for parsing/chunking with configurable worker count
-- **Optional reranker** — cross-encoder reranking via [TEI](https://github.com/huggingface/text-embeddings-inference) for higher-precision results (graceful fallback when unavailable)
+- **Optional reranker** — cross-encoder reranking via [TEI](https://github.com/huggingface/text-embeddings-inference) or LiteLLM for higher-precision results (graceful fallback when unavailable)
 - **Streamlit chat UI** — interactive RAG chat with multiple LLM providers via LiteLLM and smolagents
 
 ## Prerequisites
@@ -115,7 +115,7 @@ Run a semantic search against indexed documents.
 | `-k N` | Number of results (default: 5) |
 | `--file PATH` | Filter by source file path |
 
-When a reranker is configured (`RERANKER_URL`), the search command over-fetches `k * RERANKER_TOP_K_MULTIPLIER` candidates, reranks them with the cross-encoder, and returns the top `k`. Results display the reranker relevance score instead of the vector similarity score.
+When a reranker is configured (`RERANKER_PROVIDER` or `RERANKER_URL`), the search command over-fetches `k * RERANKER_TOP_K_MULTIPLIER` candidates, reranks them with the cross-encoder, and returns the top `k`. Results display the reranker relevance score instead of the vector similarity score.
 
 ### `stripes status`
 
@@ -202,50 +202,81 @@ All settings are managed via environment variables (or `.env` file):
 | `POSTGRES_HOST` | `localhost` | PostgreSQL host |
 | `POSTGRES_PORT` | `5432` | PostgreSQL port |
 | `POSTGRES_DB` | `stripes_rag` | Database name |
-| `EMBEDDING_MODEL` | `BAAI/bge-m3` | HuggingFace embedding model |
-| `EMBEDDING_DEVICE` | `cpu` | Compute device (`cpu`, `mps`, `cuda`) |
+| `EMBEDDING_PROVIDER` | `local` | `local` (sentence-transformers) or `litellm` (TEI, DeepInfra, OpenAI, Cohere, etc.) |
+| `EMBEDDING_MODEL` | `BAAI/bge-m3` | Embedding model name. For LiteLLM use `openai/<model>` with `EMBEDDING_API_BASE`. |
+| `EMBEDDING_DIM` | *(auto)* | Embedding dimension. Auto-detected by probing the model at startup if omitted. |
+| `EMBEDDING_DEVICE` | `cpu` | Compute device for local embeddings (`cpu`, `mps`, `cuda`) |
 | `EMBEDDING_BATCH_SIZE` | `64` | Embedding batch size |
-| `EMBEDDING_SERVER_URL` | *(unset)* | TEI server URL (omit for local sentence-transformers) |
+| `EMBEDDING_API_BASE` | *(unset)* | LiteLLM: API base URL (e.g. `http://localhost:8080/v1` for TEI, `https://api.deepinfra.com/v1/openai` for DeepInfra) |
+| `EMBEDDING_API_KEY` | *(unset)* | LiteLLM: API key |
 | `CHUNK_MAX_TOKENS` | `512` | Max tokens per chunk |
 | `INDEX_BATCH_SIZE` | `128` | DB insertion batch size |
 | `VECTOR_INDEX_TYPE` | `hnsw` | `hnsw` (high recall) or `ivfflat` (faster build) |
-| `RERANKER_URL` | *(unset)* | TEI reranker server URL (omit to disable reranking) |
-| `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Cross-encoder model for reranking |
+| `RERANKER_PROVIDER` | `none` | `none` (disabled), `tei` (TEI server), or `litellm` (any LiteLLM provider). Auto-detected as `tei` when `RERANKER_URL` is set. |
+| `RERANKER_URL` | *(unset)* | TEI reranker server URL (also auto-sets provider to `tei`) |
+| `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker model. For LiteLLM, use provider prefix (e.g. `deepinfra/nvidia/llama-nemotron-rerank-vl-1b-v2`). |
 | `RERANKER_TOP_K_MULTIPLIER` | `3` | Over-fetch multiplier (retrieve `k * N` candidates, rerank to `k`) |
+
+For LiteLLM providers, set the appropriate API key env var (e.g. `DEEPINFRA_API_KEY`, `OPENAI_API_KEY`, `COHERE_API_KEY`) — LiteLLM reads these automatically.
 
 For the Streamlit chat app, additional API keys can be set for LLM providers (DeepSeek, Mistral, Fireworks, etc.).
 
-## Embedding Server (TEI)
+## Embedding Providers
 
-By default, embeddings are computed locally with sentence-transformers. You can optionally offload embedding to a [Text Embeddings Inference](https://github.com/huggingface/text-embeddings-inference) (TEI) server — useful for dedicating GPU resources, sharing the model across services, or keeping the indexing machine lightweight.
+By default, embeddings are computed locally with sentence-transformers. Set `EMBEDDING_PROVIDER=litellm` to use any OpenAI-compatible server — TEI, DeepInfra, OpenAI, Cohere, etc. — via [LiteLLM](https://docs.litellm.ai/docs/embedding/supported_embedding).
 
-### Start TEI
+### Local (default)
 
-The docker-compose file includes an opt-in TEI service:
+No extra config needed. The `BAAI/bge-m3` model is downloaded on first run (~2 GB).
+
+```
+EMBEDDING_MODEL=BAAI/bge-m3
+```
+
+### TEI Server
+
+[TEI](https://github.com/huggingface/text-embeddings-inference) exposes an OpenAI-compatible `/v1/embeddings` endpoint. The docker-compose file includes an opt-in TEI service:
 
 ```bash
 docker compose --profile tei up -d
 ```
 
-This starts TEI on port 8080 (configurable via `TEI_PORT`) serving the same `BAAI/bge-m3` model.
-
-### Point stripes-rag at TEI
-
-Add to your `.env`:
-
 ```
-EMBEDDING_SERVER_URL=http://localhost:8080
+EMBEDDING_PROVIDER=litellm
+EMBEDDING_MODEL=openai/BAAI/bge-m3
+EMBEDDING_API_BASE=http://localhost:8080/v1
 ```
 
-That's it — both the CLI indexer and the Streamlit app will use TEI for embeddings. Remove the variable to switch back to local.
+### DeepInfra / other cloud providers
 
-### Batch size
+DeepInfra (and similar providers) also expose an OpenAI-compatible endpoint:
 
-TEI limits how many texts it accepts per request (`--max-client-batch-size`, default 32). The client automatically splits requests into batches of `EMBEDDING_BATCH_SIZE` (default 64). If you hit batch size errors, either lower `EMBEDDING_BATCH_SIZE` or increase TEI's `--max-client-batch-size`.
+```
+EMBEDDING_PROVIDER=litellm
+EMBEDDING_MODEL=openai/BAAI/bge-m3
+EMBEDDING_API_BASE=https://api.deepinfra.com/v1/openai
+EMBEDDING_API_KEY=your-deepinfra-key
+```
 
-### Important
+> **Why `openai/` prefix?** LiteLLM routes `openai/` through its OpenAI-compatible handler. The `deepinfra/` prefix only supports chat and rerank in LiteLLM — not embeddings. Since TEI, DeepInfra, and most providers all speak the OpenAI embeddings API, `openai/` + `EMBEDDING_API_BASE` is the universal approach.
 
-The TEI model must produce the same embedding dimensions (1024 for bge-m3) as the local model. Mixing models between indexing and search will produce incorrect results.
+For providers with native LiteLLM embedding support (OpenAI, Cohere, Voyage, etc.), use their prefix directly:
+
+```
+EMBEDDING_PROVIDER=litellm
+EMBEDDING_MODEL=cohere/embed-multilingual-v3.0
+COHERE_API_KEY=your-key-here
+```
+
+### Dimension auto-detection
+
+The embedding dimension is probed automatically at startup by embedding a short test string. To skip the probe, set `EMBEDDING_DIM` explicitly:
+
+```
+EMBEDDING_DIM=1024
+```
+
+**Important:** All indexed documents must use the same embedding model/dimension. Switching models requires a full re-index (`stripes reset` + `stripes index`).
 
 ## Reranker (optional)
 
@@ -253,7 +284,7 @@ A **reranker** is a cross-encoder model that rescores vector search candidates b
 
 The pipeline: retrieve `k * multiplier` candidates via vector search, rerank with the cross-encoder, return top `k`.
 
-### Start the reranker
+### TEI Reranker
 
 The docker-compose file includes an opt-in TEI reranker service:
 
@@ -263,24 +294,32 @@ docker compose --profile reranker up -d
 
 This starts a second TEI instance on port 8081 (configurable via `RERANKER_PORT`) serving `BAAI/bge-reranker-v2-m3`.
 
-### Enable reranking
-
 Add to your `.env`:
 
 ```
 RERANKER_URL=http://localhost:8081
 ```
 
-Both the CLI (`stripes search`) and the Streamlit app will use the reranker. Remove the variable to disable it.
+The provider is auto-detected as `tei` from the URL. Remove the variable to disable.
+
+### LiteLLM Reranker
+
+Use any [LiteLLM rerank provider](https://docs.litellm.ai/docs/rerank) (DeepInfra, Cohere, etc.):
+
+```
+RERANKER_PROVIDER=litellm
+RERANKER_MODEL=deepinfra/nvidia/llama-nemotron-rerank-vl-1b-v2
+DEEPINFRA_API_KEY=your-key-here
+```
 
 ### Graceful fallback
 
-If `RERANKER_URL` is set but the service is unreachable (e.g., container is down), both the CLI and the Streamlit app log a warning and fall back to plain vector similarity results. No errors are raised.
+If the reranker service is unreachable (TEI container down, API error, etc.), both the CLI and the Streamlit app log a warning and fall back to plain vector similarity results. No errors are raised.
 
 ### Tuning
 
 - `RERANKER_TOP_K_MULTIPLIER` (default: 3) controls over-fetching. With `-k 5`, the system retrieves 15 candidates and reranks to 5. Higher values improve recall but increase latency.
-- The Streamlit sidebar includes a **Reranker** checkbox to toggle reranking on/off at runtime (only enabled when `RERANKER_URL` is set).
+- The Streamlit sidebar includes a **Reranker** checkbox to toggle reranking on/off at runtime (only enabled when a reranker provider is configured).
 
 ## Architecture
 
@@ -301,7 +340,7 @@ PDF, DOCX, XLSX, PPTX, HTML, or MD files
 ┌─────────────────────────┐
 │  Main thread             │
 │  ┌───────────────────┐  │
-│  │ bge-m3 embedding   │──┼──→ local or TEI server
+│  │ bge-m3 embedding   │──┼──→ local or LiteLLM (TEI, DeepInfra, …)
 │  │ PGVectorStore      │  │
 │  │ FileTracker commit  │  │
 │  └───────────────────┘  │
@@ -371,7 +410,7 @@ Each chunk carries structured metadata extracted from Docling's provenance data:
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | `BIGSERIAL` | Primary key |
-| `embedding` | `vector(1024)` | Document chunk embedding |
+| `embedding` | `vector(N)` | Document chunk embedding (dimension auto-detected from model) |
 | `document` | `TEXT` | Chunk text content |
 | `source_file` | `TEXT` | Source file path |
 | `page_numbers` | `TEXT` | Page number(s) |
@@ -415,8 +454,8 @@ src/stripes_rag/
 ├── config.py       # Pydantic Settings (.env support)
 ├── db.py           # PGEngine + vectorstore init
 ├── tracker.py      # SHA-256 file change tracking
-├── embeddings.py   # HuggingFace embeddings wrapper
-├── reranker.py     # Optional cross-encoder reranker via TEI
+├── embeddings.py   # Embedding provider dispatch (local, LiteLLM)
+├── reranker.py     # Optional reranker dispatch (TEI, LiteLLM)
 ├── loader.py       # Docling DocumentConverter
 ├── chunker.py      # HybridChunker + metadata extraction
 ├── indexer.py       # Pipeline orchestration

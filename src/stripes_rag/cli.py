@@ -259,7 +259,7 @@ def search(query: str, k: int, source_file: str | None):
     """Semantic search across indexed documents."""
     from stripes_rag.db import get_engine, get_vectorstore
     from stripes_rag.embeddings import get_embeddings
-    from stripes_rag.reranker import rerank
+    from stripes_rag.reranker import is_reranker_available, rerank
 
     engine = get_engine()
     embeddings = get_embeddings()
@@ -270,7 +270,7 @@ def search(query: str, k: int, source_file: str | None):
         resolved = str(Path(source_file).resolve())
         filter_dict = {"source_file": resolved}
 
-    use_reranker = settings.reranker_url is not None
+    use_reranker = is_reranker_available()
     k_fetch = k * settings.reranker_top_k_multiplier if use_reranker else k
 
     with console.status("[bold cyan]Searching...[/bold cyan]"):

@@ -75,14 +75,14 @@ with st.sidebar:
     st.divider()
 
     # Reranker toggle
-    from stripes_rag.config import settings as _settings
-    _reranker_available = _settings.reranker_url is not None
+    from stripes_rag.reranker import is_reranker_available
+    _reranker_available = is_reranker_available()
     use_reranker = st.checkbox(
         "Reranker",
         value=_reranker_available,
         disabled=not _reranker_available,
-        help="Cross-encoder reranking via TEI (requires RERANKER_URL)" if _reranker_available
-             else "Set RERANKER_URL to enable",
+        help="Cross-encoder reranking (TEI or LiteLLM)" if _reranker_available
+             else "Set RERANKER_PROVIDER or RERANKER_URL to enable",
     )
 
     st.divider()

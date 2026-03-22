@@ -23,7 +23,7 @@ from stripes_rag.db import (
     init_vectorstore_table,
     rebuild_vector_index,
 )
-from stripes_rag.embeddings import get_embeddings
+from stripes_rag.embeddings import get_embedding_dim, get_embeddings
 from stripes_rag.tracker import FileTracker
 
 MAX_FILE_BYTES = settings.max_file_size_mb * 1024 * 1024
@@ -228,8 +228,9 @@ def setup_pipeline():
     loading step (visible under a spinner in the CLI).
     """
     engine = get_engine()
-    init_vectorstore_table(engine)
     embeddings = get_embeddings()
+    dim = get_embedding_dim(embeddings)
+    init_vectorstore_table(engine, vector_dim=dim)
     vectorstore = get_vectorstore(engine, embeddings)
     return engine, embeddings, vectorstore
 

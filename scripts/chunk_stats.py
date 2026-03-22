@@ -10,6 +10,7 @@ def main():
         row = conn.execute("""
             SELECT
                 COUNT(*) as total,
+                COUNT(*) FILTER (WHERE length(content) = 0) as cat0,
                 COUNT(*) FILTER (WHERE length(content) <= 2048) as cat1,
                 COUNT(*) FILTER (WHERE length(content) > 2048 AND length(content) <= 3000) as cat2,
                 COUNT(*) FILTER (WHERE length(content) > 3000 AND length(content) <= 4000) as cat3,
@@ -20,7 +21,7 @@ def main():
             FROM document_chunks
         """).fetchone()
 
-    total, cat1, cat2, cat3, cat4, avg_c, min_c, max_c = row
+    total, conn_zero, cat1, cat2, cat3, cat4, avg_c, min_c, max_c = row
 
     if total == 0:
         print("No chunks found.")
@@ -31,6 +32,7 @@ def main():
     print(f"  {'Bucket':<40} {'Count':>8}  {'%':>6}")
     print(f"  {'-'*40} {'-'*8}  {'-'*6}")
     for label, count in [
+        ("0 chars (empty)", conn_zero),
         ("≤512 tokens (≤2048 chars)", cat1),
         ("512–750 tokens (2049–3000 chars)", cat2),
         ("750–1000 tokens (3001–4000 chars)", cat3),

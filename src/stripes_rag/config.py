@@ -15,12 +15,17 @@ class Settings(BaseSettings):
     postgres_port: int = 5432
     postgres_db: str = "stripes_rag"
 
+    # Embedding provider: "local" (sentence-transformers) or "litellm" (TEI, DeepInfra, OpenAI, etc.)
+    embedding_provider: Literal["local", "litellm"] = "local"
+    embedding_dim: int | None = None  # auto-detected if None
+
     # Embedding model
-    #embedding_model: str = "google/embeddinggemma-300m"
     embedding_model: str = "BAAI/bge-m3"
     embedding_device: str = "cpu"
     embedding_batch_size: int = 64
-    embedding_server_url: str | None = None  # e.g. "http://localhost:8080"
+    # LiteLLM settings
+    embedding_api_base: str | None = None   # e.g. "http://localhost:8080/v1" or "https://api.deepinfra.com/v1/openai"
+    embedding_api_key: str | None = None
 
     # Chunking
     chunk_max_tokens: int = 512
@@ -32,12 +37,22 @@ class Settings(BaseSettings):
     # Vector index type: "hnsw" (default, high recall) or "ivfflat" (faster build, large datasets)
     vector_index_type: Literal["hnsw", "ivfflat"] = "hnsw"
 
-    # Reranker (optional)
+    # Reranker provider: "none" (disabled), "tei" (TEI server), "litellm" (any LiteLLM provider)
+    reranker_provider: Literal["none", "tei", "litellm"] = "none"
+
+    # Reranker settings
     reranker_url: str | None = None          # e.g. "http://localhost:8081"
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     reranker_top_k_multiplier: int = 3       # retrieve k*N candidates, rerank to k
     reranker_timeout: float = 120.0           # seconds; CPU reranking can be slow
     reranker_batch_size: int = 64             # TEI max batch size
+
+    @property
+    def resolved_reranker_provider(self) -> Literal["none", "tei", "litellm"]:
+        """Auto-resolve provider from URL if left at default."""
+        if self.reranker_provider == "none" and self.reranker_url:
+            return "tei"
+        return self.reranker_provider
 
     @property
     def async_connection_string(self) -> str:

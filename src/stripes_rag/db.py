@@ -8,7 +8,6 @@ from langchain_postgres import Column, PGEngine, PGVectorStore
 from stripes_rag.config import settings
 
 TABLE_NAME = "document_chunks"
-VECTOR_DIM = 1024
 
 METADATA_COLUMNS = [
     Column("source_file", "TEXT", nullable=False),
@@ -23,13 +22,13 @@ def get_engine() -> PGEngine:
     return PGEngine.from_connection_string(settings.async_connection_string)
 
 
-def init_vectorstore_table(engine: PGEngine) -> None:
+def init_vectorstore_table(engine: PGEngine, vector_dim: int = 1024) -> None:
     from sqlalchemy import text
 
     try:
         engine.init_vectorstore_table(
             table_name=TABLE_NAME,
-            vector_size=VECTOR_DIM,
+            vector_size=vector_dim,
             metadata_columns=METADATA_COLUMNS,
             overwrite_existing=False,
         )
