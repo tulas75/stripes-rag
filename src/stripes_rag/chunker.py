@@ -26,7 +26,13 @@ _MAX_CHUNK_CHARS = 8192 * 4
 
 
 def _hf_tokenizer_name() -> str:
-    """Strip LiteLLM provider prefix (e.g. 'openai/') to get a bare HF repo id."""
+    """Return a HuggingFace repo id for the chunker tokenizer.
+
+    Uses ``TOKENIZER_MODEL`` when set, otherwise falls back to
+    ``EMBEDDING_MODEL`` with LiteLLM provider prefix stripped.
+    """
+    if settings.tokenizer_model:
+        return settings.tokenizer_model
     name = settings.embedding_model
     if settings.embedding_provider == "litellm" and name.count("/") >= 2:
         name = name.split("/", 1)[1]

@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     embedding_api_key: str | None = None
 
     # Chunking
+    tokenizer_model: str | None = None  # HF repo id for chunker tokenizer; defaults to embedding_model
     chunk_max_tokens: int = 512
 
     # Indexing

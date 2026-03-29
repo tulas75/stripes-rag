@@ -209,6 +209,7 @@ All settings are managed via environment variables (or `.env` file):
 | `EMBEDDING_BATCH_SIZE` | `64` | Embedding batch size |
 | `EMBEDDING_API_BASE` | *(unset)* | LiteLLM: API base URL (e.g. `http://localhost:8080/v1` for TEI, `https://api.deepinfra.com/v1/openai` for DeepInfra) |
 | `EMBEDDING_API_KEY` | *(unset)* | LiteLLM: API key |
+| `TOKENIZER_MODEL` | *(unset)* | HuggingFace tokenizer model for chunking. Required when `EMBEDDING_MODEL` is not a HF repo id (e.g. Ollama's `bge-m3:latest`). Defaults to `EMBEDDING_MODEL`. |
 | `CHUNK_MAX_TOKENS` | `512` | Max tokens per chunk |
 | `INDEX_BATCH_SIZE` | `128` | DB insertion batch size |
 | `VECTOR_INDEX_TYPE` | `hnsw` | `hnsw` (high recall) or `ivfflat` (faster build) |
