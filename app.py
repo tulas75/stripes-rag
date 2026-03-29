@@ -39,6 +39,7 @@ MODELS = {
     "Qwen3 4B (Ollama)": "ollama_chat/qwen3:4b-instruct-2507-q8_0",
     "Groq Llama 3.1 8B": "groq/llama-3.1-8b-instant",
     "Mistral Small (API)": "mistral/mistral-small-latest",
+    "Qwen3.5 0.8B (llama.cpp)": ("openai/Qwen3.5-0.8B-Q8_0", "http://192.168.1.18:8082/v1"),
 
 }
 
@@ -63,7 +64,11 @@ with st.sidebar:
     st.divider()
 
     selected_model = st.selectbox("Model", list(MODELS.keys()), index=0)
-    model_id = MODELS[selected_model]
+    _model_entry = MODELS[selected_model]
+    if isinstance(_model_entry, tuple):
+        model_id, model_api_base = _model_entry
+    else:
+        model_id, model_api_base = _model_entry, None
 
     selected_lang = st.selectbox("Language", list(LANGUAGES.keys()), index=0)
     language = LANGUAGES[selected_lang]
@@ -290,7 +295,7 @@ if prompt or needs_response:
             agent = CodeAgent(
                 tools=[retriever_tool],
                 #model=LiteLLMModel(model_id=model_id, temperature=temperature, reasoning_effort="low"),
-                model=LiteLLMModel(model_id=model_id, temperature=temperature),
+                model=LiteLLMModel(model_id=model_id, api_base=model_api_base, temperature=temperature),
                 max_steps=max_steps,
                 stream_outputs=False,
                 additional_authorized_imports=["json"],
