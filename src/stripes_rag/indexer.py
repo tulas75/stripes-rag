@@ -98,6 +98,7 @@ def _parse_and_chunk(file_path: Path) -> dict:
             },
         }
         for c in chunks
+        if c.text.strip()
     ]
     chunk_time = time.perf_counter() - t0
 
