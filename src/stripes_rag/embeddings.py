@@ -29,43 +29,52 @@ class _LiteLLMEmbeddings(Embeddings):
         if api_key:
             self._extra["api_key"] = api_key
 
-    def _embed_single(self, text: str) -> list[float]:
-        """Embed a single text with retry: prepend a prefix on failure.
+    def _embed_single(self, text: str, dim: int) -> list[float]:
+        """Embed a single text with retries for Ollama NaN bug.
 
         Ollama's bge-m3 produces NaN for certain token combinations.
-        Prepending "passage: " changes the tokenization enough to work around
-        the bug while preserving semantic meaning.
+        Retries with different prefixes to change tokenization.  As a last
+        resort, returns a zero vector so the chunk is still stored (it just
+        won't match any similarity search).
         """
         import litellm
 
-        try:
-            resp = litellm.embedding(
-                model=self._model, input=[text], encoding_format="float", **self._extra
-            )
-            return resp.data[0]["embedding"]
-        except Exception:
-            prefixed = f"passage: {text}"
-            logger.warning("Embedding failed, retrying with prefix: %s", repr(text[:80]))
-            resp = litellm.embedding(
-                model=self._model, input=[prefixed], encoding_format="float", **self._extra
-            )
-            return resp.data[0]["embedding"]
+        attempts = [text, f"passage: {text}", f"Represent this text: {text}"]
+        for attempt in attempts:
+            try:
+                resp = litellm.embedding(
+                    model=self._model, input=[attempt], encoding_format="float", **self._extra
+                )
+                if attempt != text:
+                    logger.warning("Embedding succeeded with prefix for: %s", repr(text[:80]))
+                return resp.data[0]["embedding"]
+            except Exception:
+                continue
+        logger.warning("Embedding failed after all retries, using zero vector: %s", repr(text[:80]))
+        return [0.0] * dim
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         import litellm
 
         results: list[list[float]] = []
+        dim: int | None = None
         for i in range(0, len(texts), self._batch_size):
             batch = texts[i : i + self._batch_size]
             try:
                 resp = litellm.embedding(
                     model=self._model, input=batch, encoding_format="float", **self._extra
                 )
-                results.extend([item["embedding"] for item in resp.data])
+                batch_results = [item["embedding"] for item in resp.data]
+                results.extend(batch_results)
+                if dim is None:
+                    dim = len(batch_results[0])
             except Exception:
                 # Batch failed — retry items individually with prefix fallback
+                if dim is None:
+                    # Need dimension for zero-vector fallback; probe it
+                    dim = len(self.embed_query("dimension probe"))
                 for text in batch:
-                    results.append(self._embed_single(text))
+                    results.append(self._embed_single(text, dim))
         return results
 
     def embed_query(self, text: str) -> list[float]:
