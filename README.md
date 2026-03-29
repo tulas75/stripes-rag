@@ -10,7 +10,7 @@ A CLI tool and web interface for indexing documents (PDF, DOCX, XLSX, PPTX, HTML
 - **pgvector storage** — HNSW or IVFFlat indexing for fast similarity search
 - **Crash-safe resumability** — pending state tracking with per-file atomic commits; interrupted runs resume from where they left off
 - **Parallel processing** — `ProcessPoolExecutor` for parsing/chunking with configurable worker count
-- **Optional reranker** — cross-encoder reranking via [TEI](https://github.com/huggingface/text-embeddings-inference) or LiteLLM for higher-precision results (graceful fallback when unavailable)
+- **Optional reranker** — cross-encoder reranking via [TEI](https://github.com/huggingface/text-embeddings-inference), [llama.cpp](https://github.com/ggerganov/llama.cpp), or LiteLLM for higher-precision results (graceful fallback when unavailable)
 - **Streamlit chat UI** — interactive RAG chat with multiple LLM providers via LiteLLM and smolagents
 
 ## Prerequisites
@@ -213,8 +213,8 @@ All settings are managed via environment variables (or `.env` file):
 | `CHUNK_MAX_TOKENS` | `512` | Max tokens per chunk |
 | `INDEX_BATCH_SIZE` | `128` | DB insertion batch size |
 | `VECTOR_INDEX_TYPE` | `hnsw` | `hnsw` (high recall) or `ivfflat` (faster build) |
-| `RERANKER_PROVIDER` | `none` | `none` (disabled), `tei` (TEI server), or `litellm` (any LiteLLM provider). Auto-detected as `tei` when `RERANKER_URL` is set. |
-| `RERANKER_URL` | *(unset)* | TEI reranker server URL (also auto-sets provider to `tei`) |
+| `RERANKER_PROVIDER` | `none` | `none` (disabled), `tei` (TEI server), `llamacpp` (llama.cpp server), or `litellm` (any LiteLLM provider). Auto-detected as `tei` when `RERANKER_URL` is set. |
+| `RERANKER_URL` | *(unset)* | Reranker server URL (also auto-sets provider to `tei` if provider is `none`) |
 | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker model. For LiteLLM, use provider prefix (e.g. `deepinfra/nvidia/llama-nemotron-rerank-vl-1b-v2`). |
 | `RERANKER_TOP_K_MULTIPLIER` | `3` | Over-fetch multiplier (retrieve `k * N` candidates, rerank to `k`) |
 
@@ -302,6 +302,22 @@ RERANKER_URL=http://localhost:8081
 ```
 
 The provider is auto-detected as `tei` from the URL. Remove the variable to disable.
+
+### llama.cpp Reranker
+
+[llama.cpp](https://github.com/ggerganov/llama.cpp) server exposes a `/v1/rerank` endpoint when started with `--reranking`:
+
+```bash
+llama-server --model bge-reranker-v2-m3.gguf --port 8081 --reranking --pooling rank --embedding
+```
+
+```
+RERANKER_PROVIDER=llamacpp
+RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+RERANKER_URL=http://localhost:8081
+```
+
+> **Note:** You must explicitly set `RERANKER_PROVIDER=llamacpp` — auto-detect defaults to `tei`. This also works with Ollama once it merges native rerank support (PR #7219).
 
 ### LiteLLM Reranker
 
@@ -456,7 +472,7 @@ src/stripes_rag/
 ├── db.py           # PGEngine + vectorstore init
 ├── tracker.py      # SHA-256 file change tracking
 ├── embeddings.py   # Embedding provider dispatch (local, LiteLLM)
-├── reranker.py     # Optional reranker dispatch (TEI, LiteLLM)
+├── reranker.py     # Optional reranker dispatch (TEI, llama.cpp, LiteLLM)
 ├── loader.py       # Docling DocumentConverter
 ├── chunker.py      # HybridChunker + metadata extraction
 ├── indexer.py       # Pipeline orchestration

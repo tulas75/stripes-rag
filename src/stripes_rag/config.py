@@ -38,8 +38,8 @@ class Settings(BaseSettings):
     # Vector index type: "hnsw" (default, high recall) or "ivfflat" (faster build, large datasets)
     vector_index_type: Literal["hnsw", "ivfflat"] = "hnsw"
 
-    # Reranker provider: "none" (disabled), "tei" (TEI server), "litellm" (any LiteLLM provider)
-    reranker_provider: Literal["none", "tei", "litellm"] = "none"
+    # Reranker provider: "none" (disabled), "tei" (TEI server), "litellm" (any LiteLLM provider), "llamacpp" (llama.cpp server)
+    reranker_provider: Literal["none", "tei", "litellm", "llamacpp"] = "none"
 
     # Reranker settings
     reranker_url: str | None = None          # e.g. "http://localhost:8081"
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     reranker_batch_size: int = 64             # TEI max batch size
 
     @property
-    def resolved_reranker_provider(self) -> Literal["none", "tei", "litellm"]:
+    def resolved_reranker_provider(self) -> Literal["none", "tei", "litellm", "llamacpp"]:
         """Auto-resolve provider from URL if left at default."""
         if self.reranker_provider == "none" and self.reranker_url:
             return "tei"

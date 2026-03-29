@@ -1,4 +1,4 @@
-"""Optional cross-encoder reranker via TEI or LiteLLM."""
+"""Optional cross-encoder reranker via TEI, LiteLLM, or llama.cpp."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 def is_reranker_available() -> bool:
-    """Check whether a reranker is configured (TEI or LiteLLM)."""
-    return settings.resolved_reranker_provider in ("tei", "litellm")
+    """Check whether a reranker is configured."""
+    return settings.resolved_reranker_provider in ("tei", "litellm", "llamacpp")
 
 
 def _rerank_tei(
@@ -90,6 +90,51 @@ def _rerank_litellm(
     return results, True
 
 
+def _rerank_llamacpp(
+    query: str,
+    docs_with_scores: list[tuple[Document, float]],
+    top_k: int,
+) -> tuple[list[tuple[Document, float]], bool]:
+    """Rerank via llama.cpp /v1/rerank HTTP endpoint."""
+    import httpx
+
+    texts = [doc.page_content for doc, _ in docs_with_scores]
+    batch_size = settings.reranker_batch_size
+
+    url = f"{settings.reranker_url}/v1/rerank"
+    logger.warning("Reranker POST %s with %d texts (batch_size=%d)", url, len(texts), batch_size)
+
+    all_scored: list[dict] = []
+    try:
+        for offset in range(0, len(texts), batch_size):
+            batch = texts[offset : offset + batch_size]
+            resp = httpx.post(
+                url,
+                json={
+                    "model": settings.reranker_model,
+                    "query": query,
+                    "documents": batch,
+                    "top_n": len(batch),
+                },
+                timeout=settings.reranker_timeout,
+            )
+            resp.raise_for_status()
+            for r in resp.json()["results"]:
+                all_scored.append({"index": offset + r["index"], "score": r["relevance_score"]})
+    except (httpx.HTTPError, httpx.ConnectError, KeyError) as e:
+        logger.warning("Reranker unavailable (%s), falling back to vector scores", e)
+        return docs_with_scores[:top_k], False
+
+    all_scored.sort(key=lambda r: r["score"], reverse=True)
+
+    results: list[tuple[Document, float]] = []
+    for r in all_scored[:top_k]:
+        doc, _ = docs_with_scores[r["index"]]
+        results.append((doc, r["score"]))
+
+    return results, True
+
+
 def rerank(
     query: str,
     docs_with_scores: list[tuple[Document, float]],
@@ -113,5 +158,8 @@ def rerank(
 
     if provider == "litellm":
         return _rerank_litellm(query, docs_with_scores, top_k)
+
+    if provider == "llamacpp":
+        return _rerank_llamacpp(query, docs_with_scores, top_k)
 
     return _rerank_tei(query, docs_with_scores, top_k)
