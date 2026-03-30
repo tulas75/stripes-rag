@@ -11,6 +11,8 @@ A CLI tool and web interface for indexing documents (PDF, DOCX, XLSX, PPTX, HTML
 - **Crash-safe resumability** — pending state tracking with per-file atomic commits; interrupted runs resume from where they left off
 - **Parallel processing** — `ProcessPoolExecutor` for parsing/chunking with configurable worker count
 - **Optional reranker** — cross-encoder reranking via [TEI](https://github.com/huggingface/text-embeddings-inference), [llama.cpp](https://github.com/ggerganov/llama.cpp), or LiteLLM for higher-precision results (graceful fallback when unavailable)
+- **REST API** — FastAPI server for programmatic search, file listing, and status
+- **MCP server** — Model Context Protocol server for Claude Desktop / Claude Code integration
 - **Streamlit chat UI** — interactive RAG chat with multiple LLM providers via LiteLLM and smolagents
 
 ## Prerequisites
@@ -146,6 +148,30 @@ Re-index all previously tracked files.
 | `-j, --workers N` | Parallel parse workers (default: 2) |
 | `--device DEVICE` | Embedding device: `cpu`, `mps`, or `cuda` (overrides `EMBEDDING_DEVICE`) |
 | `--skip-reindex` | Skip rebuilding the vector index after indexing |
+
+### `stripes serve`
+
+Start the REST API server for querying indexed documents.
+
+```bash
+stripes serve                     # default: 0.0.0.0:8000
+stripes serve --port 9000         # custom port
+stripes serve --reload            # dev mode with auto-reload
+```
+
+| Flag | Description |
+|------|-------------|
+| `--host HOST` | Bind address (default: `0.0.0.0`) |
+| `-p, --port PORT` | Port (default: `8000`) |
+| `--reload` | Auto-reload on code changes (dev mode) |
+
+### `stripes mcp`
+
+Start the MCP server (stdio transport) for Claude Desktop or Claude Code.
+
+```bash
+stripes mcp
+```
 
 ### `stripes rebuild-index`
 
@@ -338,6 +364,91 @@ If the reranker service is unreachable (TEI container down, API error, etc.), bo
 - `RERANKER_TOP_K_MULTIPLIER` (default: 3) controls over-fetching. With `-k 5`, the system retrieves 15 candidates and reranks to 5. Higher values improve recall but increase latency.
 - The Streamlit sidebar includes a **Reranker** checkbox to toggle reranking on/off at runtime (only enabled when a reranker provider is configured).
 
+## REST API
+
+Start the API server with `stripes serve`. All endpoints are read-only (no indexing).
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/search` | Semantic search |
+| `GET` | `/files` | List indexed files |
+| `GET` | `/status` | Indexing statistics |
+| `GET` | `/health` | Liveness check |
+
+### `POST /search`
+
+```bash
+curl -X POST http://localhost:8000/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "revenue forecast", "k": 5}'
+```
+
+Request body:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `query` | string | *(required)* | Search query text |
+| `k` | int | `5` | Number of results (1–50) |
+| `source_file` | string | `null` | Filter by file path |
+| `rerank` | bool | `null` | Force reranking on/off (`null` = auto-detect) |
+
+### `GET /files`
+
+```bash
+curl 'http://localhost:8000/files'                  # first 50 files
+curl 'http://localhost:8000/files?name=budget'       # search by name
+curl 'http://localhost:8000/files?limit=10&offset=20' # pagination
+```
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `name` | string | `null` | Filter by name (case-insensitive partial match) |
+| `limit` | int | `50` | Max results (1–500) |
+| `offset` | int | `0` | Skip first N results |
+
+### `GET /status`
+
+Returns indexing statistics: file counts, chunk totals, storage size, embedding config.
+
+### `GET /health`
+
+Returns `{"status": "ok"}`.
+
+## MCP Server
+
+The MCP server exposes search tools for Claude Desktop, Claude Code, and other MCP clients via stdio transport.
+
+### Setup for Claude Desktop
+
+Add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "stripes-rag": {
+      "command": "stripes",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Setup for Claude Code
+
+```bash
+claude mcp add stripes-rag stripes mcp
+```
+
+### Available tools
+
+| Tool | Description |
+|------|-------------|
+| `search(query, k, source_file, rerank)` | Semantic search across indexed documents |
+| `list_files(name, limit)` | List indexed files (default: first 50). Use `name` for filtering |
+| `status()` | Indexing statistics (file counts, chunks, size) |
+
 ## Architecture
 
 ```
@@ -476,6 +587,9 @@ src/stripes_rag/
 ├── loader.py       # Docling DocumentConverter
 ├── chunker.py      # HybridChunker + metadata extraction
 ├── indexer.py       # Pipeline orchestration
+├── search.py       # Shared query service (used by CLI, API, MCP)
+├── api.py          # FastAPI REST API
+├── mcp_server.py   # MCP server (stdio transport)
 └── prompts.py      # RAG prompt profiles
 app.py              # Streamlit chat interface
 docker-compose.yml  # PostgreSQL 17 + pgvector

@@ -277,12 +277,17 @@ class FileTracker:
             return None
         return FileRecord(*row)
 
-    def all_records(self) -> list[FileRecord]:
+    def all_records(self, *, limit: int | None = None, offset: int = 0) -> list[FileRecord]:
+        query = (
+            "SELECT file_path, file_hash, file_size, chunk_count, indexed_at, updated_at, status, error_message "
+            "FROM file_tracking ORDER BY updated_at DESC"
+        )
+        params: list = []
+        if limit is not None:
+            query += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT file_path, file_hash, file_size, chunk_count, indexed_at, updated_at, status, error_message "
-                "FROM file_tracking ORDER BY updated_at DESC"
-            ).fetchall()
+            rows = conn.execute(query, params or None).fetchall()
         return [FileRecord(*r) for r in rows]
 
     def error_records(self) -> list[FileRecord]:

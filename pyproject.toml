@@ -21,6 +21,9 @@ dependencies = [
     "streamlit",
     "smolagents",
     "litellm",
+    "fastapi",
+    "uvicorn[standard]",
+    "mcp[cli]",
 ]
 
 [project.scripts]

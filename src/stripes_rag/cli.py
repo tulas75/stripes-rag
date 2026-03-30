@@ -265,44 +265,20 @@ def scan(directory: Path, recursive: bool, force: bool, retry_errors: bool, dry_
 @click.option("--file", "source_file", default=None, help="Filter by source file path")
 def search(query: str, k: int, source_file: str | None):
     """Semantic search across indexed documents."""
-    from stripes_rag.db import get_engine, get_vectorstore
-    from stripes_rag.embeddings import get_embeddings
-    from stripes_rag.reranker import is_reranker_available, rerank
-
-    engine = get_engine()
-    embeddings = get_embeddings()
-    vectorstore = get_vectorstore(engine, embeddings)
-
-    filter_dict = None
-    if source_file:
-        resolved = str(Path(source_file).resolve())
-        filter_dict = {"source_file": resolved}
-
-    use_reranker = is_reranker_available()
-    k_fetch = k * settings.reranker_top_k_multiplier if use_reranker else k
+    from stripes_rag.search import get_search_service
 
     with console.status("[bold cyan]Searching...[/bold cyan]"):
-        results = vectorstore.similarity_search_with_score(
-            query, k=k_fetch, filter=filter_dict
-        )
+        service = get_search_service()
+        response = service.search(query, k=k, source_file=source_file)
 
-        reranked = False
-        if use_reranker:
-            for doc, distance in results:
-                doc.metadata['_vector_distance'] = distance
-            results, reranked = rerank(query, results, top_k=k)
-
-    if not results:
+    if not response.results:
         console.print("[yellow]No results found.[/yellow]")
         return
 
-    for i, (doc, score) in enumerate(results, 1):
-        meta = doc.metadata
-        vector_sim = 1 - meta.pop('_vector_distance', 1 - score) if reranked else 1 - score
-
-        source = Path(meta.get("source_file", "unknown")).name
-        pages = meta.get("page_numbers", "?")
-        headings = meta.get("headings", "")
+    for i, r in enumerate(response.results, 1):
+        source = Path(r.metadata.get("source_file", "unknown")).name
+        pages = r.metadata.get("page_numbers", "?")
+        headings = r.metadata.get("headings", "")
 
         table = Table(
             title=f"Result {i}",
@@ -312,14 +288,14 @@ def search(query: str, k: int, source_file: str | None):
         )
         table.add_column("Field", style="dim")
         table.add_column("Value")
-        if reranked:
-            table.add_row("Reranker", f"{score:.4f}")
-        table.add_row("Similarity", f"{vector_sim:.4f}")
+        if response.reranked:
+            table.add_row("Reranker", f"{r.reranker_score:.4f}")
+        table.add_row("Similarity", f"{r.vector_similarity:.4f}")
         table.add_row("Source", source)
         table.add_row("Pages", str(pages))
         if headings:
             table.add_row("Headings", headings)
-        table.add_row("Text", doc.page_content[:300] + ("..." if len(doc.page_content) > 300 else ""))
+        table.add_row("Text", r.content[:300] + ("..." if len(r.content) > 300 else ""))
         console.print(table)
         console.print()
 
@@ -588,6 +564,26 @@ def rebuild_index_cmd():
         rebuild_vector_index(engine)
 
     console.print("[green]Vector index rebuilt.[/green]")
+
+
+@cli.command()
+@click.option("--host", default="0.0.0.0", show_default=True, help="Bind address")
+@click.option("--port", "-p", default=8000, show_default=True, help="Port")
+@click.option("--reload", is_flag=True, help="Auto-reload on code changes (dev mode)")
+def serve(host: str, port: int, reload: bool):
+    """Start the REST API server."""
+    import uvicorn
+
+    console.print(f"Starting API server on [bold]{host}:{port}[/bold]")
+    uvicorn.run("stripes_rag.api:app", host=host, port=port, reload=reload)
+
+
+@cli.command(name="mcp")
+def mcp_cmd():
+    """Start the MCP server (stdio transport for Claude Desktop/Code)."""
+    from stripes_rag.mcp_server import main
+
+    main()
 
 
 @cli.command()
