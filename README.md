@@ -209,6 +209,22 @@ stripes import backup.dump -y          # skip confirmation
 | `--replace` | Clear existing data before import (default: merge) |
 | `-y, --yes` | Skip confirmation prompt |
 
+### `stripes export-atlas <file>`
+
+Export embeddings and metadata to a Parquet file for visualization with [embedding-atlas](https://github.com/apple/embedding-atlas).
+
+```bash
+stripes export-atlas chunks.parquet                          # export all chunks
+stripes export-atlas small.parquet --limit 1000              # subset
+stripes export-atlas report.parquet --file-filter report.pdf # single file
+embedding-atlas chunks.parquet --vector embedding --text text # launch viewer
+```
+
+| Flag | Description |
+|------|-------------|
+| `--limit N` | Max chunks to export (default: all) |
+| `--file-filter TEXT` | Filter by source file name (partial match) |
+
 ### `stripes reset`
 
 Drop all indexed data (vectors and tracking records).

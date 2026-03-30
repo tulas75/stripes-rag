@@ -586,6 +586,78 @@ def mcp_cmd():
     main()
 
 
+@cli.command(name="export-atlas")
+@click.argument("file", type=click.Path(path_type=Path))
+@click.option("--limit", default=None, type=int, help="Max chunks to export (default: all)")
+@click.option("--file-filter", "source_file", default=None, help="Filter by source file name")
+def export_atlas(file: Path, limit: int | None, source_file: str | None):
+    """Export embeddings + metadata to Parquet for embedding-atlas.
+
+    \b
+    Two-step workflow:
+      stripes export-atlas chunks.parquet
+      embedding-atlas chunks.parquet --vector embedding --text text
+    """
+    import json
+
+    import numpy as np
+    import pandas as pd
+    import psycopg
+
+    from stripes_rag.db import TABLE_NAME
+
+    query = (
+        f'SELECT embedding::text, document, source_file, page_numbers, '
+        f'headings, chunk_index FROM "{TABLE_NAME}"'
+    )
+    params: list = []
+    conditions: list[str] = []
+
+    if source_file:
+        conditions.append("source_file ILIKE %s")
+        params.append(f"%{source_file}%")
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    query += " ORDER BY source_file, chunk_index"
+
+    if limit is not None:
+        query += " LIMIT %s"
+        params.append(limit)
+
+    with console.status("[bold cyan]Exporting embeddings...[/bold cyan]"):
+        with psycopg.connect(settings.sync_connection_string) as conn:
+            rows = conn.execute(query, params or None).fetchall()
+
+    if not rows:
+        console.print("[yellow]No chunks found.[/yellow]")
+        return
+
+    with console.status(f"[bold cyan]Building Parquet ({len(rows)} chunks)...[/bold cyan]"):
+        embeddings = [json.loads(row[0]) for row in rows]
+
+        df = pd.DataFrame({
+            "embedding": [np.array(e, dtype=np.float32) for e in embeddings],
+            "text": [row[1] for row in rows],
+            "source_file": [Path(row[2]).name for row in rows],
+            "page_numbers": [row[3] for row in rows],
+            "headings": [row[4] for row in rows],
+            "chunk_index": [row[5] for row in rows],
+        })
+
+        df.to_parquet(file, engine="pyarrow")
+
+    size_mb = file.stat().st_size / (1024 * 1024)
+    console.print(
+        f"[green]✓[/green] Exported [bold]{len(rows)}[/bold] chunks to "
+        f"[cyan]{file}[/cyan] ({size_mb:.1f} MB)"
+    )
+    console.print(
+        f"\n[dim]Run: embedding-atlas {file} --vector embedding --text text[/dim]"
+    )
+
+
 @cli.command()
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
 def reset(yes: bool):
