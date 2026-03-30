@@ -166,6 +166,7 @@ def _run_pipeline(
     vectorstore,
     tracker: FileTracker,
     workers: int = 2,
+    start_callback=None,
     progress_callback=None,
     result_callback=None,
 ) -> list[FileResult]:
@@ -181,6 +182,8 @@ def _run_pipeline(
         pending: dict = {}
         for _ in range(min(workers + 1, len(files_to_process))):
             fp = next(file_iter)
+            if start_callback:
+                start_callback(fp)
             pending[pool.submit(_parse_and_chunk, fp)] = fp
 
         while pending:
@@ -189,11 +192,10 @@ def _run_pipeline(
             for future in done:
                 file_path = pending.pop(future)
 
-                if progress_callback:
-                    progress_callback(file_path, len(results), len(files_to_process))
-
                 try:
                     data = future.result()
+                    if progress_callback:
+                        progress_callback(file_path, len(results), len(files_to_process))
                     result = _embed_and_store(data, engine, vectorstore, tracker)
                 except Exception as e:
                     try:
@@ -212,6 +214,8 @@ def _run_pipeline(
                 try:
                     fp = next(file_iter)
                     pending[pool.submit(_parse_and_chunk, fp)] = fp
+                    if start_callback:
+                        start_callback(fp)
                 except StopIteration:
                     pass
 
@@ -238,6 +242,7 @@ def setup_pipeline():
 
 def index_pending(
     workers: int = 4,
+    start_callback=None,
     progress_callback=None,
     result_callback=None,
     *,
@@ -285,6 +290,7 @@ def index_pending(
     pipeline_results = _run_pipeline(
         files_to_process, engine, vectorstore, tracker,
         workers=workers,
+        start_callback=start_callback,
         progress_callback=progress_callback,
         result_callback=result_callback,
     )

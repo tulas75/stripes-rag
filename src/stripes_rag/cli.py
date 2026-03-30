@@ -73,7 +73,10 @@ def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bo
             TextColumn("{task.completed}/{task.total}"),
             console=console,
         ) as progress:
-            task = progress.add_task("Indexing...", total=len(pending))
+            task = progress.add_task("Starting...", total=len(pending))
+
+            def on_start(file_path):
+                progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
 
             def on_progress(file_path, done, total):
                 progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
@@ -83,6 +86,7 @@ def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bo
 
             results = index_pending(
                 workers=workers,
+                start_callback=on_start,
                 progress_callback=on_progress,
                 result_callback=on_result,
                 engine=engine,
@@ -139,7 +143,10 @@ def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bo
         TextColumn("{task.completed}/{task.total}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Indexing...", total=total, completed=skipped_count)
+        task = progress.add_task("Starting...", total=total, completed=skipped_count)
+
+        def on_start(file_path):
+            progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
 
         def on_progress(file_path, done, total):
             progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
@@ -149,6 +156,7 @@ def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bo
 
         results = index_pending(
             workers=workers,
+            start_callback=on_start,
             progress_callback=on_progress,
             result_callback=on_result,
             engine=engine,
@@ -538,7 +546,10 @@ def reindex(workers: int, device: str | None, skip_reindex: bool):
         TextColumn("{task.completed}/{task.total}"),
         console=console,
     ) as progress:
-        task = progress.add_task("Re-indexing...", total=len(paths))
+        task = progress.add_task("Starting...", total=len(paths))
+
+        def on_start(file_path):
+            progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
 
         def on_progress(file_path, done, total):
             progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
@@ -548,6 +559,7 @@ def reindex(workers: int, device: str | None, skip_reindex: bool):
 
         results = index_pending(
             workers=workers,
+            start_callback=on_start,
             progress_callback=on_progress,
             result_callback=on_result,
             engine=engine,

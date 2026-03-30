@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import warnings
+import logging as _logging
 from dataclasses import dataclass
 from pathlib import Path
 
-warnings.filterwarnings(
-    "ignore",
-    message="Token indices sequence length is longer than the specified maximum sequence length",
-)
+# HybridChunker tokenizes the entire document to find chunk boundaries, which
+# triggers a warning for large documents (e.g. 4M+ tokens for big spreadsheets).
+# Individual chunks are still correctly limited.  The transformers library uses
+# logging.warning(), so warnings.filterwarnings() has no effect — we suppress
+# via the logging level instead.
+_logging.getLogger("transformers.tokenization_utils_base").setLevel(_logging.ERROR)
 
 from docling_core.transforms.chunker import HybridChunker
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
