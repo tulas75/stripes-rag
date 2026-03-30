@@ -24,7 +24,6 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "mcp[cli]",
-    "embedding-atlas",
     "pandas",
     "pyarrow",
 ]
