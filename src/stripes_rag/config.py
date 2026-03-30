@@ -1,16 +1,20 @@
+import os
 from pathlib import Path
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# .env lookup order: CWD first (so MCP config's "cwd" works), then
-# fall back to the package source root (for direct installs).
+# .env lookup: explicit STRIPES_ENV_FILE env var first, then CWD, then
+# package source root.  The explicit var is the reliable path for MCP
+# servers launched by Claude Desktop.
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent.parent
+_explicit = os.environ.get("STRIPES_ENV_FILE")
+_env_files = (_explicit,) if _explicit else (_PACKAGE_ROOT / ".env", ".env")
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(_PACKAGE_ROOT / ".env", ".env"),
+        env_file=_env_files,
         env_file_encoding="utf-8",
         extra="ignore",
     )
