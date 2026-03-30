@@ -607,7 +607,7 @@ def export_atlas(file: Path, limit: int | None, source_file: str | None):
     from stripes_rag.db import TABLE_NAME
 
     query = (
-        f'SELECT embedding::text, document, source_file, page_numbers, '
+        f'SELECT embedding::text, content, source_file, page_numbers, '
         f'headings, chunk_index FROM "{TABLE_NAME}"'
     )
     params: list = []
