@@ -105,10 +105,13 @@ def status() -> str:
     )
 
 
-def main():
+def main(transport: str = "stdio", host: str = "0.0.0.0", port: int = 8001):
     """Entry point for ``stripes mcp`` command."""
     get_search_service()  # front-load model loading
-    mcp.run()
+    if transport == "sse":
+        mcp.run(transport="sse", host=host, port=port)
+    else:
+        mcp.run()
 
 
 if __name__ == "__main__":

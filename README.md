@@ -169,11 +169,19 @@ stripes serve --reload            # dev mode with auto-reload
 
 ### `stripes mcp`
 
-Start the MCP server (stdio transport) for Claude Desktop or Claude Code.
+Start the MCP server.
 
 ```bash
-stripes mcp
+stripes mcp                              # stdio (local Claude Desktop/Code)
+stripes mcp --transport sse              # HTTP/SSE on port 8001 (LAN clients)
+stripes mcp --transport sse --port 9000  # custom port
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--transport MODE` | `stdio` (default, local) or `sse` (HTTP for LAN clients) |
+| `--host HOST` | SSE bind address (default: `0.0.0.0`) |
+| `-p, --port PORT` | SSE port (default: `8001`) |
 
 ### `stripes rebuild-index`
 
@@ -460,6 +468,26 @@ Add to your `claude_desktop_config.json`:
 
 ```bash
 claude mcp add stripes-rag stripes mcp
+```
+
+### Setup for LAN clients (SSE transport)
+
+Start the SSE server on the machine with the database:
+
+```bash
+stripes mcp --transport sse
+```
+
+On client machines (no Python needed), add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "stripes-rag": {
+      "url": "http://SERVER_IP:8001/sse"
+    }
+  }
+}
 ```
 
 ### Available tools

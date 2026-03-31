@@ -609,11 +609,22 @@ def serve(host: str, port: int, reload: bool):
 
 
 @cli.command(name="mcp")
-def mcp_cmd():
-    """Start the MCP server (stdio transport for Claude Desktop/Code)."""
+@click.option("--transport", type=click.Choice(["stdio", "sse"]), default="stdio", show_default=True,
+              help="Transport: stdio (local) or sse (HTTP for LAN clients)")
+@click.option("--host", default="0.0.0.0", show_default=True, help="SSE bind address")
+@click.option("--port", "-p", default=8001, show_default=True, help="SSE port")
+def mcp_cmd(transport: str, host: str, port: int):
+    """Start the MCP server.
+
+    \b
+    stdio (default): for local Claude Desktop/Code.
+    sse: HTTP/SSE server for LAN clients (no Python needed on client).
+    """
     from stripes_rag.mcp_server import main
 
-    main()
+    if transport == "sse":
+        console.print(f"Starting MCP server (SSE) on [bold]{host}:{port}[/bold]")
+    main(transport=transport, host=host, port=port)
 
 
 @cli.command(name="export-atlas")
