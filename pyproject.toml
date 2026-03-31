@@ -26,6 +26,7 @@ dependencies = [
     "mcp[cli]",
     "pandas",
     "pyarrow",
+    "pymupdf",
 ]
 
 [project.scripts]

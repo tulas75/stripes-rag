@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     tokenizer_model: str | None = None  # HF repo id for chunker tokenizer; defaults to embedding_model
     chunk_max_tokens: int = 512
 
+    # Parser mode: "hiquality" (Docling always), "quality" (Docling + fast fallback), "fast" (fast always)
+    parser_mode: Literal["hiquality", "quality", "fast"] = "quality"
+    parser_page_threshold: int = 100   # PDF: fall back to fast parser above this page count
+    parser_size_threshold_mb: int = 10  # DOCX/PPTX/HTML/MD: fall back above this file size
+
     # Indexing
     index_batch_size: int = 128
     max_file_size_mb: int = 50

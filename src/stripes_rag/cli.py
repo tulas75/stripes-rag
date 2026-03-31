@@ -35,14 +35,21 @@ def cli():
 @click.option("--device", type=click.Choice(["cpu", "mps", "cuda"]), default=None,
               help="Embedding device (overrides EMBEDDING_DEVICE env var)")
 @click.option("--skip-reindex", is_flag=True, help="Skip rebuilding the vector index after indexing")
-def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bool, workers: int, device: str | None, skip_reindex: bool):
+@click.option("--parser-mode", type=click.Choice(["hiquality", "quality", "fast"]), default=None,
+              help="Parser mode (overrides PARSER_MODE env var)")
+def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bool, workers: int, device: str | None, skip_reindex: bool, parser_mode: str | None):
     """Index documents from a directory, or resume processing pending files.
 
     With DIRECTORY: scan + process (register new/changed files, then index them).
     Without DIRECTORY: resume processing any pending files from a previous run.
     """
+    import os
+
     if device:
         settings.embedding_device = device
+    if parser_mode:
+        os.environ["PARSER_MODE"] = parser_mode
+        settings.parser_mode = parser_mode
 
     from stripes_rag.indexer import index_pending, setup_pipeline
     from stripes_rag.tracker import FileTracker
@@ -493,10 +500,17 @@ def delete(filename: str, yes: bool):
 @click.option("--device", type=click.Choice(["cpu", "mps", "cuda"]), default=None,
               help="Embedding device (overrides EMBEDDING_DEVICE env var)")
 @click.option("--skip-reindex", is_flag=True, help="Skip rebuilding the vector index after indexing")
-def reindex(workers: int, device: str | None, skip_reindex: bool):
+@click.option("--parser-mode", type=click.Choice(["hiquality", "quality", "fast"]), default=None,
+              help="Parser mode (overrides PARSER_MODE env var)")
+def reindex(workers: int, device: str | None, skip_reindex: bool, parser_mode: str | None):
     """Re-index all previously tracked files."""
+    import os
+
     if device:
         settings.embedding_device = device
+    if parser_mode:
+        os.environ["PARSER_MODE"] = parser_mode
+        settings.parser_mode = parser_mode
 
     from stripes_rag.indexer import index_pending, setup_pipeline
     from stripes_rag.tracker import FileTracker

@@ -67,24 +67,60 @@ def discover_files(directory: Path, recursive: bool = False) -> list[Path]:
 # Worker (runs in subprocess)
 # ---------------------------------------------------------------------------
 
+def _should_use_fast(file_path: Path) -> bool:
+    """Decide whether to use the fast parser based on mode and file properties."""
+    from stripes_rag.config import settings
+
+    mode = settings.parser_mode
+    if mode == "fast":
+        return True
+    if mode == "hiquality":
+        return False
+
+    # quality mode: per-format rules
+    ext = file_path.suffix.lower()
+    if ext == ".xlsx":
+        return True  # always fast for XLSX
+
+    if ext == ".pdf":
+        import fitz
+        doc = fitz.open(file_path)
+        pages = len(doc)
+        doc.close()
+        return pages > settings.parser_page_threshold
+
+    # DOCX/PPTX/HTML/MD: file size threshold
+    return file_path.stat().st_size > settings.parser_size_threshold_mb * 1024 * 1024
+
+
 def _parse_and_chunk(file_path: Path) -> dict:
     """Parse + chunk a single file.  Returns serializable data."""
     import time
 
-    from stripes_rag.chunker import chunk_document
-    from stripes_rag.loader import convert_file
     from stripes_rag.tracker import _sha256
 
     resolved = str(file_path.resolve())
     file_hash = _sha256(file_path)
 
-    t0 = time.perf_counter()
-    doc = convert_file(file_path)
-    parse_time = time.perf_counter() - t0
+    if _should_use_fast(file_path):
+        from stripes_rag.fast_parser import fast_parse_and_chunk
 
-    t0 = time.perf_counter()
-    chunks = chunk_document(doc, file_path, file_hash)
-    del doc
+        t0 = time.perf_counter()
+        chunks = fast_parse_and_chunk(file_path, file_hash)
+        parse_time = time.perf_counter() - t0
+        chunk_time = 0.0
+    else:
+        from stripes_rag.chunker import chunk_document
+        from stripes_rag.loader import convert_file
+
+        t0 = time.perf_counter()
+        doc = convert_file(file_path)
+        parse_time = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        chunks = chunk_document(doc, file_path, file_hash)
+        del doc
+        chunk_time = time.perf_counter() - t0
 
     lc_doc_data = [
         {
@@ -100,7 +136,6 @@ def _parse_and_chunk(file_path: Path) -> dict:
         for c in chunks
         if c.text.strip()
     ]
-    chunk_time = time.perf_counter() - t0
 
     return {
         "file_path": file_path,

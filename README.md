@@ -91,6 +91,7 @@ stripes index docs/ -r --device mps # scan + process with Apple GPU
 | `-j, --workers N` | Parallel parse workers (default: 2) |
 | `--device DEVICE` | Embedding device: `cpu`, `mps`, or `cuda` (overrides `EMBEDDING_DEVICE`) |
 | `--skip-reindex` | Skip rebuilding the vector index after indexing |
+| `--parser-mode MODE` | `hiquality`, `quality`, or `fast` (overrides `PARSER_MODE`) |
 
 ### `stripes scan <directory>`
 
@@ -148,6 +149,7 @@ Re-index all previously tracked files.
 | `-j, --workers N` | Parallel parse workers (default: 2) |
 | `--device DEVICE` | Embedding device: `cpu`, `mps`, or `cuda` (overrides `EMBEDDING_DEVICE`) |
 | `--skip-reindex` | Skip rebuilding the vector index after indexing |
+| `--parser-mode MODE` | `hiquality`, `quality`, or `fast` (overrides `PARSER_MODE`) |
 
 ### `stripes serve`
 
@@ -255,6 +257,9 @@ All settings are managed via environment variables (or `.env` file):
 | `CHUNK_MAX_TOKENS` | `512` | Max tokens per chunk |
 | `INDEX_BATCH_SIZE` | `128` | DB insertion batch size |
 | `VECTOR_INDEX_TYPE` | `hnsw` | `hnsw` (high recall) or `ivfflat` (faster build) |
+| `PARSER_MODE` | `quality` | `hiquality` (Docling always), `quality` (Docling + fast fallback), `fast` (fast parser always) |
+| `PARSER_PAGE_THRESHOLD` | `100` | PDF: use fast parser above this page count (quality mode only) |
+| `PARSER_SIZE_THRESHOLD_MB` | `10` | DOCX/PPTX/HTML/MD: use fast parser above this file size (quality mode only) |
 | `RERANKER_PROVIDER` | `none` | `none` (disabled), `tei` (TEI server), `llamacpp` (llama.cpp server), or `litellm` (any LiteLLM provider). Auto-detected as `tei` when `RERANKER_URL` is set. |
 | `RERANKER_URL` | *(unset)* | Reranker server URL (also auto-sets provider to `tei` if provider is `none`) |
 | `RERANKER_MODEL` | `BAAI/bge-reranker-v2-m3` | Reranker model. For LiteLLM, use provider prefix (e.g. `deepinfra/nvidia/llama-nemotron-rerank-vl-1b-v2`). |
@@ -465,6 +470,24 @@ claude mcp add stripes-rag stripes mcp
 | `list_files(name, limit)` | List indexed files (default: first 50). Use `name` for filtering |
 | `status()` | Indexing statistics (file counts, chunks, size) |
 
+## Parser Modes
+
+The parser mode controls how documents are converted to text before chunking and embedding.
+
+| Mode | Description |
+|------|-------------|
+| **`quality`** (default) | Docling for most files. Fast parser for XLSX (always) and large files (PDF > 100 pages, others > 10 MB). Best balance of quality and speed. |
+| **`hiquality`** | Docling for everything, no fallback. Best quality but slowest — can hang on large spreadsheets. |
+| **`fast`** | Fast parser for everything. Uses PyMuPDF (PDF), pandas (XLSX), python-docx (DOCX), python-pptx (PPTX). No ML inference. Instant but no structural chunking. |
+
+The fast parser extracts plain text and chunks by character count. It preserves page numbers (PDF) and sheet names (XLSX) but loses Docling's structural chunking (heading hierarchy, table-aware splits).
+
+```bash
+stripes index docs/ -r --parser-mode fast        # fast for everything
+stripes index docs/ -r --parser-mode hiquality    # Docling for everything
+PARSER_MODE=fast stripes index docs/ -r           # via env var
+```
+
 ## Architecture
 
 ```
@@ -603,6 +626,7 @@ src/stripes_rag/
 ├── loader.py       # Docling DocumentConverter
 ├── chunker.py      # HybridChunker + metadata extraction
 ├── indexer.py       # Pipeline orchestration
+├── fast_parser.py   # Fast parsers (PyMuPDF, pandas, python-docx, etc.)
 ├── search.py       # Shared query service (used by CLI, API, MCP)
 ├── api.py          # FastAPI REST API
 ├── mcp_server.py   # MCP server (stdio transport)
