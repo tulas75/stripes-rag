@@ -85,7 +85,7 @@ def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bo
                 parts = []
                 if parsing:
                     names = ", ".join(_trunc(p.name) for p in parsing)
-                    parts.append(f"[dim]Parsing: {names}[/dim]")
+                    parts.append(f"[dim]Parsing:[/dim] {names}")
                 if embedding:
                     parts.append(f"[cyan]Embedding: {_trunc(embedding.name)}[/cyan]")
                 if parts:
