@@ -11,7 +11,8 @@ def main():
             SELECT
                 COUNT(*) as total,
                 COUNT(*) FILTER (WHERE length(content) = 0) as cat0,
-                COUNT(*) FILTER (WHERE length(content) <= 2048) as cat1,
+                COUNT(*) FILTER (WHERE length(content) > 0 AND length(content) < 200) as cat_small,
+                COUNT(*) FILTER (WHERE length(content) >= 200 AND length(content) <= 2048) as cat1,
                 COUNT(*) FILTER (WHERE length(content) > 2048 AND length(content) <= 3000) as cat2,
                 COUNT(*) FILTER (WHERE length(content) > 3000 AND length(content) <= 4000) as cat3,
                 COUNT(*) FILTER (WHERE length(content) > 4000) as cat4,
@@ -21,7 +22,7 @@ def main():
             FROM document_chunks
         """).fetchone()
 
-    total, conn_zero, cat1, cat2, cat3, cat4, avg_c, min_c, max_c = row
+    total, conn_zero, cat_small, cat1, cat2, cat3, cat4, avg_c, min_c, max_c = row
 
     if total == 0:
         print("No chunks found.")
@@ -33,7 +34,8 @@ def main():
     print(f"  {'-'*40} {'-'*8}  {'-'*6}")
     for label, count in [
         ("0 chars (empty)", conn_zero),
-        ("≤512 tokens (≤2048 chars)", cat1),
+        ("<50 tokens (<200 chars)", cat_small),
+        ("50–512 tokens (200–2048 chars)", cat1),
         ("512–750 tokens (2049–3000 chars)", cat2),
         ("750–1000 tokens (3001–4000 chars)", cat3),
         (">1000 tokens (>4000 chars)", cat4),
