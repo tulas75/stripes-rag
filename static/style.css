@@ -1,6 +1,6 @@
 /* Reset Pico's oversized defaults */
 :root {
-  --pico-font-size: 14px;
+  --pico-font-size: 16px;
   --pico-line-height: 1.4;
   --pico-spacing: 0.5rem;
 }
@@ -8,7 +8,7 @@
 html, body {
   margin: 0;
   padding: 0;
-  font-size: 14px;
+  font-size: 16px;
   overflow: hidden;
   height: 100%;
 }
