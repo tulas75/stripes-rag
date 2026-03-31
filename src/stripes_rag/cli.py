@@ -73,7 +73,7 @@ def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bo
 
         with Progress(
             SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
+            TextColumn("[progress.description]{task.description}", max_width=50),
             BarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TextColumn("{task.completed}/{task.total}"),
