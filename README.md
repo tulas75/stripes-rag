@@ -641,20 +641,25 @@ Each chunk carries structured metadata extracted from Docling's provenance data:
 | `indexed_at` | `TIMESTAMPTZ` | First indexed |
 | `updated_at` | `TIMESTAMPTZ` | Last updated |
 
-## Streamlit Chat App
+## Web Chat App
 
-The web interface (`app.py`) provides:
+The built-in web chat (`stripes serve`, open http://localhost:8000) provides:
 
+- **RAG chat with smolagents** — CodeAgent with RetrieverTool, streaming responses
 - **Multiple RAG profiles**: Classic RAG, Project Architect, Study Companion
 - **Model selection**: Ollama, DeepSeek, Mistral, DeepInfra, Groq, and more via LiteLLM
 - **Language toggle**: Italian / English
-- **Reranker toggle**: Enable/disable cross-encoder reranking from the sidebar
-- **Source references**: Expandable sections showing retrieved chunks with similarity scores
-- **Auto-generated follow-up questions**
+- **Reranker toggle**: Enable/disable cross-encoder reranking
+- **Source references**: Expandable sections showing retrieved chunks with similarity/reranker scores
+- **Follow-up questions**: Clickable buttons for suggested follow-ups
+- **Chat history**: Persisted in browser localStorage across sessions
+- **Stats**: Timing breakdown (retrieval vs LLM), token counts
 
 ```bash
-streamlit run app.py
+stripes serve                 # open http://localhost:8000
 ```
+
+The legacy Streamlit app is still available via `streamlit run app.py`.
 
 ## Project Structure
 
