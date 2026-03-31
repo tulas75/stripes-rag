@@ -166,33 +166,47 @@ def _run_pipeline(
     vectorstore,
     tracker: FileTracker,
     workers: int = 2,
-    progress_callback=None,
+    status_callback=None,
     result_callback=None,
 ) -> list[FileResult]:
-    """Process files with parallel parse+chunk and serial embed+store."""
+    """Process files with parallel parse+chunk and serial embed+store.
+
+    status_callback(parsing: list[Path], embedding: Path | None) is called
+    whenever the set of in-flight files changes.
+    """
     if not files_to_process:
         return []
 
     results: list[FileResult] = []
     file_iter = iter(files_to_process)
+    parsing_set: set[Path] = set()
+
+    def _notify(embedding: Path | None = None):
+        if status_callback:
+            status_callback(sorted(parsing_set, key=lambda p: p.name), embedding)
+
+    def _submit(fp: Path):
+        parsing_set.add(fp)
+        pending[pool.submit(_parse_and_chunk, fp)] = fp
+        _notify()
 
     with ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context("spawn")) as pool:
         # Sliding window: keep workers+1 futures in flight
         pending: dict = {}
         for _ in range(min(workers + 1, len(files_to_process))):
             fp = next(file_iter)
-            pending[pool.submit(_parse_and_chunk, fp)] = fp
+            _submit(fp)
 
         while pending:
             done, _ = wait(pending, return_when=FIRST_COMPLETED)
 
             for future in done:
                 file_path = pending.pop(future)
+                parsing_set.discard(file_path)
 
                 try:
                     data = future.result()
-                    if progress_callback:
-                        progress_callback(file_path, len(results), len(files_to_process))
+                    _notify(embedding=file_path)
                     result = _embed_and_store(data, engine, vectorstore, tracker)
                 except Exception as e:
                     try:
@@ -210,9 +224,9 @@ def _run_pipeline(
                 # Submit next file to keep the window full
                 try:
                     fp = next(file_iter)
-                    pending[pool.submit(_parse_and_chunk, fp)] = fp
+                    _submit(fp)
                 except StopIteration:
-                    pass
+                    _notify()
 
     return results
 
@@ -237,7 +251,7 @@ def setup_pipeline():
 
 def index_pending(
     workers: int = 4,
-    progress_callback=None,
+    status_callback=None,
     result_callback=None,
     *,
     engine=None,
@@ -284,7 +298,7 @@ def index_pending(
     pipeline_results = _run_pipeline(
         files_to_process, engine, vectorstore, tracker,
         workers=workers,
-        progress_callback=progress_callback,
+        status_callback=status_callback,
         result_callback=result_callback,
     )
     results.extend(pipeline_results)
@@ -305,7 +319,7 @@ def index_directory(
     force: bool = False,
     retry_errors: bool = False,
     workers: int = 4,
-    progress_callback=None,
+    status_callback=None,
     result_callback=None,
 ) -> tuple[int, int, int, list[FileResult]]:
     """Scan + process all supported document files in a directory.
@@ -323,7 +337,7 @@ def index_directory(
 
     results = index_pending(
         workers=workers,
-        progress_callback=progress_callback,
+        status_callback=status_callback,
         result_callback=result_callback,
     )
 
@@ -332,7 +346,7 @@ def index_directory(
 
 def reindex_all(
     workers: int = 4,
-    progress_callback=None,
+    status_callback=None,
     result_callback=None,
 ) -> list[FileResult]:
     """Re-index all previously tracked files."""
@@ -347,6 +361,6 @@ def reindex_all(
 
     return index_pending(
         workers=workers,
-        progress_callback=progress_callback,
+        status_callback=status_callback,
         result_callback=result_callback,
     )

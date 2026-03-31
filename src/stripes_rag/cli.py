@@ -75,15 +75,22 @@ def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bo
         ) as progress:
             task = progress.add_task("Parsing...", total=len(pending))
 
-            def on_progress(file_path, done, total):
-                progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
+            def on_status(parsing, embedding):
+                parts = []
+                if parsing:
+                    names = ", ".join(p.name for p in parsing)
+                    parts.append(f"[dim]Parsing: {names}[/dim]")
+                if embedding:
+                    parts.append(f"[cyan]Embedding: {embedding.name}[/cyan]")
+                if parts:
+                    progress.update(task, description=" | ".join(parts))
 
             def on_result(result):
                 progress.advance(task)
 
             results = index_pending(
                 workers=workers,
-                progress_callback=on_progress,
+                status_callback=on_status,
                 result_callback=on_result,
                 engine=engine,
                 vectorstore=vectorstore,
@@ -141,15 +148,22 @@ def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bo
     ) as progress:
         task = progress.add_task("Parsing...", total=total, completed=skipped_count)
 
-        def on_progress(file_path, done, total):
-            progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
+        def on_status(parsing, embedding):
+            parts = []
+            if parsing:
+                names = ", ".join(p.name for p in parsing)
+                parts.append(f"[dim]Parsing: {names}[/dim]")
+            if embedding:
+                parts.append(f"[cyan]Embedding: {embedding.name}[/cyan]")
+            if parts:
+                progress.update(task, description=" | ".join(parts))
 
         def on_result(result):
             progress.advance(task)
 
         results = index_pending(
             workers=workers,
-            progress_callback=on_progress,
+            status_callback=on_status,
             result_callback=on_result,
             engine=engine,
             vectorstore=vectorstore,
@@ -516,15 +530,22 @@ def reindex(workers: int, device: str | None, skip_reindex: bool):
     ) as progress:
         task = progress.add_task("Parsing...", total=len(paths))
 
-        def on_progress(file_path, done, total):
-            progress.update(task, description=f"[cyan]{file_path.name}[/cyan]")
+        def on_status(parsing, embedding):
+            parts = []
+            if parsing:
+                names = ", ".join(p.name for p in parsing)
+                parts.append(f"[dim]Parsing: {names}[/dim]")
+            if embedding:
+                parts.append(f"[cyan]Embedding: {embedding.name}[/cyan]")
+            if parts:
+                progress.update(task, description=" | ".join(parts))
 
         def on_result(result):
             progress.advance(task)
 
         results = index_pending(
             workers=workers,
-            progress_callback=on_progress,
+            status_callback=on_status,
             result_callback=on_result,
             engine=engine,
             vectorstore=vectorstore,
