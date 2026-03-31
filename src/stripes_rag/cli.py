@@ -13,6 +13,12 @@ from stripes_rag.config import settings
 
 console = Console()
 
+_MAX_NAME_LEN = 30
+
+
+def _trunc(name: str) -> str:
+    return name if len(name) <= _MAX_NAME_LEN else name[:_MAX_NAME_LEN - 1] + "…"
+
 
 @click.group()
 def cli():
@@ -78,10 +84,10 @@ def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bo
             def on_status(parsing, embedding):
                 parts = []
                 if parsing:
-                    names = ", ".join(p.name for p in parsing)
+                    names = ", ".join(_trunc(p.name) for p in parsing)
                     parts.append(f"[dim]Parsing: {names}[/dim]")
                 if embedding:
-                    parts.append(f"[cyan]Embedding: {embedding.name}[/cyan]")
+                    parts.append(f"[cyan]Embedding: {_trunc(embedding.name)}[/cyan]")
                 if parts:
                     progress.update(task, description=" | ".join(parts))
 

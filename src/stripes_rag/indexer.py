@@ -58,8 +58,8 @@ def discover_files(directory: Path, recursive: bool = False) -> list[Path]:
     else:
         for ext in SUPPORTED_EXTENSIONS:
             files.extend(directory.glob(f"*{ext}"))
-    # Filter out macOS ._ resource fork files
-    files = [f for f in files if not f.name.startswith("._")]
+    # Filter out macOS ._ resource fork files and Office ~$ lock files
+    files = [f for f in files if not f.name.startswith("._") and not f.name.startswith("~$")]
     return sorted(files)
 
 

@@ -8,6 +8,7 @@ from pathlib import Path
 from docling.document_converter import DocumentConverter
 
 logging.getLogger("RapidOCR").setLevel(logging.WARNING)
+logging.getLogger("docling").setLevel(logging.WARNING)
 from docling_core.types.doc.document import DoclingDocument
 
 
