@@ -478,13 +478,20 @@ Start the SSE server on the machine with the database:
 stripes mcp --transport sse
 ```
 
-On client machines (no Python needed), add to `claude_desktop_config.json`:
+On client machines, install `mcp-remote` (requires Node.js, no Python needed):
+
+```bash
+npm install -g mcp-remote
+```
+
+Then add to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "stripes-rag": {
-      "url": "http://SERVER_IP:8001/sse"
+      "command": "mcp-remote",
+      "args": ["http://SERVER_IP:8001/sse"]
     }
   }
 }
