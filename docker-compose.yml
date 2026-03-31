@@ -33,6 +33,43 @@ services:
       postgres:
         condition: service_healthy
 
+  stripes-api:
+    build: .
+    command: stripes serve --host 0.0.0.0 --port 8000
+    ports:
+      - "${API_PORT:-8000}:8000"
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      EMBEDDING_DEVICE: cpu
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    profiles:
+      - api
+
+  stripes-mcp:
+    build: .
+    command: stripes mcp --transport sse --port 8001
+    ports:
+      - "${MCP_PORT:-8001}:8001"
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      EMBEDDING_DEVICE: cpu
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - mcp
+
   tei:
     image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
     ports:

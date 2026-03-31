@@ -48,6 +48,14 @@ docker compose up -d
 
 This starts PostgreSQL 17 with the pgvector extension on port 5432.
 
+Optional services via profiles:
+
+```bash
+docker compose --profile api up -d                # + REST API on port 8000
+docker compose --profile mcp up -d                # + MCP SSE server on port 8001
+docker compose --profile api --profile mcp up -d  # both
+```
+
 ### 4. Index documents
 
 ```bash

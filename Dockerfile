@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir --no-deps .
 ARG EMBEDDING_MODEL=BAAI/bge-m3
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')"
 
-EXPOSE 8501
+EXPOSE 8000 8001 8501
 
 # Default: run the Streamlit app. Override with "stripes" for CLI usage.
 CMD ["streamlit", "run", "app.py", "--server.address", "0.0.0.0"]
