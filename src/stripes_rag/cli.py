@@ -82,14 +82,15 @@ def index(directory: Path | None, recursive: bool, force: bool, retry_errors: bo
             task = progress.add_task("Parsing...", total=len(pending))
 
             def on_status(parsing, embedding):
-                parts = []
-                if parsing:
-                    names = ", ".join(_trunc(p.name) for p in parsing)
-                    parts.append(f"[dim]Parsing:[/dim] {names}")
                 if embedding:
-                    parts.append(f"[cyan]Embedding: {_trunc(embedding.name)}[/cyan]")
-                if parts:
-                    progress.update(task, description=" | ".join(parts))
+                    desc = f"[cyan]Embedding:[/cyan] [white]{_trunc(embedding.name)}[/white]"
+                elif parsing:
+                    desc = f"[dim]Parsing:[/dim] [white]{_trunc(parsing[-1].name)}[/white]"
+                else:
+                    return
+                if parsing and embedding:
+                    desc += f" [dim]({len(parsing)} parsing)[/dim]"
+                progress.update(task, description=desc)
 
             def on_result(result):
                 progress.advance(task)
